@@ -1,6 +1,6 @@
-use super::bootrom::Bootrom;
-use super::hram::HRam;
-use super::wram::WRam;
+use crate::bootrom::Bootrom;
+use crate::hram::HRam;
+use crate::wram::WRam;
 
 pub struct Peripherals {
     pub bootrom: Bootrom,

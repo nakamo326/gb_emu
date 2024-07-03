@@ -1,6 +1,8 @@
+mod operand;
+mod peripherals;
 mod registers;
 
-use super::peripherals::Peripherals;
+use peripherals::Peripherals;
 use registers::Registers;
 
 #[derive(Default)]
