@@ -51,19 +51,19 @@ impl Registers {
         self.l = val as u8;
     }
 
-    pub fn zf(&self) -> {
+    pub fn zf(&self) -> bool {
         (self.f & 0b1000_0000) != 0
     }
 
-    pub fn nf(&self) -> {
+    pub fn nf(&self) -> bool {
         (self.f & 0b0100_0000) != 0
     }
 
-    pub fn hf(&self) -> {
+    pub fn hf(&self) -> bool {
         (self.f & 0b0010_0000) != 0
     }
 
-    pub fn cf(&self) -> {
+    pub fn cf(&self) -> bool {
         (self.f & 0b0001_0000) != 0
     }
 
