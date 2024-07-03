@@ -1,3 +1,4 @@
+mod instructions;
 mod operand;
 mod peripherals;
 mod registers;
