@@ -6,7 +6,7 @@ impl WRam {
         Self(Box::new([0; 0x2000]))
     }
 
-    pub fn read(&self, addr: u16) {
+    pub fn read(&self, addr: u16) -> u8 {
         self.0[(addr as usize) & 0x1fff]
     }
 
