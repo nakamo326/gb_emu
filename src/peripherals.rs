@@ -1,3 +1,7 @@
+use super::bootrom::Bootrom;
+use super::hram::HRam;
+use super::wram::WRam;
+
 pub struct Peripherals {
     pub bootrom: Bootrom,
     pub wram: WRam,
@@ -5,7 +9,7 @@ pub struct Peripherals {
 }
 
 impl Peripherals {
-    pub fn new(bootrom: Bootrom) -> self {
+    pub fn new(bootrom: Bootrom) -> Self {
         Self {
             bootrom,
             wram: WRam::new(),
