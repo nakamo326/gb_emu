@@ -1,5 +1,5 @@
 pub struct Bootrom {
-    rom: Box<[u8; 256]>,
+    rom: Box<[u8]>,
     active: bool,
 }
 
