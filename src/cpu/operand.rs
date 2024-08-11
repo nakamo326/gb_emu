@@ -219,3 +219,54 @@ impl IO8<Indirect> for Cpu {
         });
     }
 }
+
+impl IO8<Direct8> for Cpu {
+    fn read8(&mut self, bus: &Peripherals, src: Direct8) -> Option<u8> {
+        step!(None, {
+            0: if let Some(lo) = self.read8(bus, Imm8) {
+                VAL8.store(lo, Relaxed);
+                go!(1);
+                if let Direct8::DFF = src {
+                    VAL16.store(0xFF00 | (lo as u16), Relaxed);
+                    go!(2);
+                }
+            },
+            1: if let Some(hi) = self.read8(bus, Imm8) {
+                VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
+                go!(2);
+            },
+            2: {
+                VAL8.store(bus.read(VAL16.load(Relaxed)), Relaxed);
+                go!(3);
+                return None;
+            },
+            3: {
+                go!(0);
+                return Some(VAL8.load(Relaxed));
+            },
+        });
+    }
+
+    fn write8(&mut self, bus: &mut Peripherals, dst: Direct8, val: u8) -> Option<()> {
+        step!(None, {
+            0: if let Some(lo) = self.read8(bus, Imm8) {
+                VAL8.store(lo, Relaxed);
+                go!(1);
+                if let Direct8::DDF = dst {
+                    VAL16.store(0xFF00 | (lo as u16), Relaxed);
+                    go!(2);
+                }
+            },
+            1: if let Some(hi) = self.read8(bus, Imm8) {
+                VAL.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
+                go!(2);
+            },
+            2: {
+                bus.write(VAL16.load(Relaxed), val);
+                go!(3);
+                return None;
+            },
+            3: return Some(go!(0)),
+        });
+    }
+}
