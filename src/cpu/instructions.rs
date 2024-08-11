@@ -2,7 +2,7 @@ macro_rules! step {
     ($d:expr, {$($c:tt : $e:expr,)*}) => {
         static STEP: AtomicU8 = AtomicU8::new(0);
         #[allow(dead_code)]
-        static VAL8: AtomicU8 = AtomicU8:new(0);
+        static VAL8: AtomicU8 = AtomicU8::new(0);
         #[allow(dead_code)]
         static VAL16: AtomicU16 = AtomicU16::new(0);
         $(if STEP.load(Relaxed) == $c { $e })* else { return $d; }
