@@ -175,4 +175,16 @@ impl Cpu {
             },
         });
     }
+
+    pub fn bit<S: Copy>(&mut self, bus: &mut Peripherals, bit: usize, src: S)
+    where
+        Self: IO8<S>,
+    {
+        if let Some(v) = self.read8(bus, src) {
+            self.regs.set_zf(v & (1 << bit) == 0);
+            self.regs.set_nf(false);
+            self.regs.set_hf(true);
+            self.fetch(bus);
+        }
+    }
 }
