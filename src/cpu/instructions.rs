@@ -152,7 +152,7 @@ impl Cpu {
                 go!(0);
                 self.fetch(bus);
             },
-        })
+        });
     }
 
     pub fn rl<S: Copy>(&mut self, bus: &mut Peripherals, src: S)
