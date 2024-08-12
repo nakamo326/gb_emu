@@ -1,3 +1,4 @@
+mod decode;
 mod instructions;
 mod operand;
 mod peripherals;
@@ -22,13 +23,6 @@ impl Cpu {
         self.ctx.opcode = bus.read(self.regs.pc);
         self.regs.pc = self.regs.pc.wrapping_add(1);
         self.ctx.cb = false;
-    }
-
-    pub fn decode(&mut self, bus: &mut Peripherals) {
-        match self.ctx.opcode {
-            0x00 => self.nop(bus),
-            _ => unimplemented!("opcode: {:#02x}", self.ctx.opcode),
-        }
     }
 
     fn nop(&mut self, bus: &Peripherals) {
