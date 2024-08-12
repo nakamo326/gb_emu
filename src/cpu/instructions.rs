@@ -62,4 +62,57 @@ impl Cpu {
             },
         });
     }
+
+    pub fn cp<S: Copy>(&mut self, bus: &mut Peripherals, src: S)
+    where
+        Self: IO8<S>,
+    {
+        if let Some(v) = self.read8(bus, src) {
+            let (result, carry) = self.regs.a.overflowing_sub(v);
+            self.regs.set_zf(result == 0);
+            self.regs.set_nf(true);
+            self.regs.set_hf((self.regs.a & 0x0F) < (v & 0x0F));
+            self.regs.set_cf(carry);
+            self.fetch(bus);
+        }
+    }
+
+    pub fn inc<S: Copy>(&mut self, bus: &mut Peripherals, src: S)
+    where
+        Self: IO8<S>,
+    {
+        step!((), {
+            0: if let Some(v) = self.rad8(bus, src) {
+                let result = v.wrapping_add(1);
+                self.regs.set_zf(result == 0);
+                self.regs.set_nf(false);
+                self.regs.set_hf((v & 0x0F) == 0x0F);
+                VAL8.store(result, Relaxed);
+                go!(1);
+            },
+            1: if self.write8(bus, src, VAL8.load(Relaxed)).is_some() {
+                go!(0);
+                self.fetch(bus);
+            },
+        });
+    }
+
+    pub fn inc16<S: Copy>(&mut self, bus: &mut Peripherals, src: S)
+    where
+        Self: IO16<S>,
+    {
+        step!((), {
+            0: if let Some(v) = self.read16(bus, src) {
+                VAL16.store(v.wrapping_add(1), Relaxed);
+                go!(1);
+            },
+            1: if self.write16(bus, src, VAL16.load(Relaxed)).is_some() {
+                go!(2);
+            },
+            2: {
+                go!(0);
+                self.fetch(bus);
+            },
+        });
+    }
 }
