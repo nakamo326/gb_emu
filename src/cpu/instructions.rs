@@ -1,5 +1,5 @@
 use super::{
-    operand::{IO16, IO8},
+    operand::{Reg16, IO16, IO8},
     peripherals::Peripherals,
     Cpu,
 };
@@ -184,6 +184,78 @@ impl Cpu {
             self.regs.set_zf(v & (1 << bit) == 0);
             self.regs.set_nf(false);
             self.regs.set_hf(true);
+            self.fetch(bus);
+        }
+    }
+
+    pub fn push16(&mut self, bus: &mut Peripherals, val: u16) -> Option<()> {
+        step!(None, {
+            0: {
+                go!(1);
+                return None;
+            },
+            1: {
+                let [lo, hi] = u16::to_le_bytes(val);
+                self.regs.sp = self.regs.sp.wrapping_sub(1);
+                bus.write(self.regs.sp, hi);
+                VAL8.store(lo, Relaxed);
+                go!(2);
+                return None;
+            },
+            2: {
+                self.regs.sp = self.regs.sp.wrapping_sub(1);
+                bus.write(self.regs.sp, VAL8.load(Relaxed));
+                go!(3);
+                return None;
+            },
+            3: {
+                go!(0);
+                return Some(());
+            },
+        });
+    }
+
+    pub fn push(&mut self, bus: &mut Peripherals, src: Reg16) {
+        step!((), {
+            0:{
+                VAL16.store(self.read16(bus, src).unwrap(), Relaxed);
+                go!(1);
+            },
+            1: if self.push16(bus, VAL16.load(Relaxed)).is_some() {
+                go!(2);
+            },
+            2: {
+                go!(0);
+                self.fetch(bus);
+            },
+        });
+    }
+
+    pub fn pop16(&mut self, bus: &mut Peripherals) {
+        step!(None, {
+            0: {
+                VAL8.store(bus.read(self.regs.sp), Relaxed);
+                self.regs.sp = self.regs.sp.wrapping_add(1);
+                go!(1);
+                return None;
+            },
+            1: {
+                let hi = bus.read(self.regs.sp);
+                self.regs.sp = self.regs.sp.wrapping_add(1);
+                VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
+                go!(2);
+                return None;
+            },
+            2: {
+                go!(0);
+                return Some(VAL16.load(Relaxed));
+            },
+        });
+    }
+
+    pub fn pop(&mut self, bus: &mut Peripherals, dst: Reg16) {
+        if let Some(v) = self.pop16(bus) {
+            self.write16(bus, dst, v);
             self.fetch(bus);
         }
     }
