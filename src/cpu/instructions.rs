@@ -1,5 +1,5 @@
 use super::{
-    operand::{Reg16, IO16, IO8},
+    operand::{Cond, Reg16, IO16, IO8},
     peripherals::Peripherals,
     Cpu,
 };
@@ -258,5 +258,57 @@ impl Cpu {
             self.write16(bus, dst, v);
             self.fetch(bus);
         }
+    }
+
+    pub fn jr(&mut self, bus: &mut Peripherals) {
+        step!((), {
+            0: if let Some(offset) = self.read8(bus, Imm8) {
+                self.regs.pc = self.regs.pc.wrapping_add(offset as i8 as u16);
+                go!(1);
+            },
+            1: {
+                go!(0);
+                self.fetch(bus);
+            },
+        });
+    }
+
+    fn cond(&self, cond: Cond) {
+        match cond {
+            Cond::NZ => !self.regs.zf(),
+            Cond::Z => self.regs.zf(),
+            Cond::NC => !self.regs.cf(),
+            Cond::C => self.regs.cf(),
+        }
+    }
+
+    pub fn jr_c(&mut self, bus: &mut Peripherals, c: Cond) {
+        step!((), {
+            0: if let Some(offset) = self.read8(bus, Imm8) {
+                go!(1);
+                if self.cond(c) {
+                    self.regs.pc = self.regs.pc.wrapping_add(offset as i8 as u16);
+                    return;
+                }
+            },
+            1: {
+                go!(0);
+                self.fetch(bus);
+            },
+        });
+    }
+
+    pub fn call(&mut self, bus: &mut Peripherals) {
+        step!((), {
+            0: if let Some(v) = self.read16(bus, Imm16) {
+                VAL16.store(v, Relaxed);
+                go!(1);
+            },
+            1: if self.push16(bus, self.regs.pc).is_some() {
+                self.regs.pc = VAL16.load(Relaxed);
+                go!(0);
+                self.fetch(bus);
+            },
+        })
     }
 }
