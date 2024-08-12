@@ -309,6 +309,19 @@ impl Cpu {
                 go!(0);
                 self.fetch(bus);
             },
-        })
+        });
+    }
+
+    pub fn ret(&mut self, bus: &mut Peripherals) {
+        step!((), {
+            0: if let Some(v) = self.pop16(bus) {
+                self.regs.pc = v;
+                go!(1);
+            },
+            1: {
+                go!(0);
+                self.fetch(bus);
+            },
+        });
     }
 }
