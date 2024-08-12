@@ -1,5 +1,5 @@
 use super::{
-    operand::{Cond, Reg16, IO16, IO8},
+    operand::{Cond, Imm16, Imm8, Reg16, IO16, IO8},
     peripherals::Peripherals,
     Cpu,
 };
@@ -82,7 +82,7 @@ impl Cpu {
         Self: IO8<S>,
     {
         step!((), {
-            0: if let Some(v) = self.rad8(bus, src) {
+            0: if let Some(v) = self.read8(bus, src) {
                 let result = v.wrapping_add(1);
                 self.regs.set_zf(result == 0);
                 self.regs.set_nf(false);
@@ -231,7 +231,7 @@ impl Cpu {
         });
     }
 
-    pub fn pop16(&mut self, bus: &mut Peripherals) {
+    pub fn pop16(&mut self, bus: &mut Peripherals) -> Option<u16> {
         step!(None, {
             0: {
                 VAL8.store(bus.read(self.regs.sp), Relaxed);
@@ -273,7 +273,7 @@ impl Cpu {
         });
     }
 
-    fn cond(&self, cond: Cond) {
+    fn cond(&self, cond: Cond) -> bool {
         match cond {
             Cond::NZ => !self.regs.zf(),
             Cond::Z => self.regs.zf(),
