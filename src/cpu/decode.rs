@@ -1,5 +1,5 @@
 use super::{
-    operand::{Cond, Direct16, Direct8, Imm8, Indirect, Reg16, Reg8, IO8},
+    operand::{Cond, Direct16, Direct8, Imm16, Imm8, Indirect, Reg16, Reg8, IO8},
     peripherals::Peripherals,
     Cpu,
 };
