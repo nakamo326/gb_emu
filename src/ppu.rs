@@ -34,14 +34,74 @@ pub struct Ppu {
     obp1: u8,
     wy: u8,
     wx: u8,
-    vram: [u8; 0x2000],
-    oam: [u8; 0xA0],
+    vram: Box<[u8; 0x2000]>,
+    oam: Box<[u8; 0xA0]>,
 }
 
 impl Ppu {
     pub fn new() -> Self {
         Self {
             mode: Mode::OAMScan,
+            vram: Box::new([0; 0x2000]),
+            oam: Box::new([0; 0xA0]),
+        }
+    }
+
+    pub fn read(&self, addr: u16) -> u8 {
+        match addr {
+            0x8000..=0x9FFF => {
+                if self.mode == Mode::Drawing {
+                    0xFF
+                } else {
+                    self.vram[addr as usize & 0x1FFF]
+                }
+            }
+            0xFE00..=0xFE9F => {
+                if self.mode == Mode::Drawing || self.mode == Mode::OAMScan {
+                    0xFF
+                } else {
+                    self.oam[addr as usize & 0xFF]
+                }
+            }
+            0xFF40 => self.lcdc,
+            0xFF41 => 0x80 | self.stat | self.mode as u8, // 最上位bitは常に1、下の二桁はmode
+            0xFF42 => self.scy,
+            0xFF43 => self.scx,
+            0xFF44 => self.ly,
+            0xFF45 => self.lyc,
+            0xFF47 => self.bgp,
+            0xFF48 => self.obp0,
+            0xFF49 => self.obp1,
+            0xFF4A => self.wy,
+            0xFF4B => self.wx,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn write(&mut self, addr: u16, val: u8) {
+        match addr {
+            0x8000..=0x9FFF => {
+                if self.mode != Mode::Drawing {
+                    self.vram[addr as usize & 0x1FFF] = val;
+                }
+            }
+            0xFE00..=0xFE9F => {
+                if self.mode != Mode::Drawing && self.mode != Mode::OAMScan {
+                    self.oam[addr as usize & 0xFF] = val;
+                }
+            }
+            0xFF40 => self.lcdc = val,
+            0xFF41 => self.stat = (self.stat & LYC_EQ_LY) | (val & 0xF8),
+            0xFF42 => {}
+            0xFF43 => {}
+            0xFF44 => {}
+            0xFF45 => {}
+            0xFF47 => {}
+            0xFF48 => {}
+            0xFF49 => {}
+            0xFF4A => {}
+            0xFF4B => {}
+            _ => unreachable!(),
         }
     }
 }
