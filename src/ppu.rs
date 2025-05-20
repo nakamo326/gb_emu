@@ -115,4 +115,14 @@ impl Ppu {
             _ => unreachable!(),
         }
     }
+
+    fn get_pixel_from_tile(&self, tile_idx: usize, row: u8, col: u8) -> u8 {
+        let r = (row * 2) as usize;
+        let c = (7 - col) as usize;
+        let tile_addr = tile_idx * 16;
+        let low = self.vram[(tile_addr | r) & 0x1FFF];
+        let high = self.vram[(tile_addr | (r + 1)) & 0x1FFF];
+        let pixel = ((low >> c) & 1) | (((high >> c) & 1) << 1);
+        pixel
+    }
 }
