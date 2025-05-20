@@ -3,6 +3,17 @@ name = "db-emu"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies.sdl2]
-version = "0.35.2"
-features = ["bundled", "raw-window-handle", "static-link"]
+[target.'cfg(target_os = "macos")'.dependencies]
+sdl2 = { version = "0.35.2", default-features = false, features = [
+  "raw-window-handle",
+] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+sdl2 = { version = "0.35.2", default-features = false, features = [
+  "bundled",
+  "raw-window-handle",
+  "static-link",
+] }
+
+[features]
+default = []
