@@ -8,6 +8,7 @@ use std::time::Duration;
 mod bootrom;
 mod cpu;
 mod hram;
+mod ppu;
 mod wram;
 
 pub fn main() -> Result<(), String> {
