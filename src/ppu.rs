@@ -42,6 +42,17 @@ impl Ppu {
     pub fn new() -> Self {
         Self {
             mode: Mode::OAMScan,
+            lcdc: 0,
+            stat: 0,
+            scy: 0,
+            scx: 0,
+            ly: 0,
+            lyc: 0,
+            bgp: 0,
+            obp0: 0,
+            obp1: 0,
+            wy: 0,
+            wx: 0,
             vram: Box::new([0; 0x2000]),
             oam: Box::new([0; 0xA0]),
         }
