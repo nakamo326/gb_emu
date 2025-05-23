@@ -1,9 +1,9 @@
 use super::{
+    Cpu,
     instructions::{go, step},
     peripherals::Peripherals,
-    Cpu,
 };
-use std::sync::atomic::{AtomicU16, AtomicU8, Ordering::Relaxed};
+use std::sync::atomic::{AtomicU8, AtomicU16, Ordering::Relaxed};
 
 pub trait IO8<T: Copy> {
     fn read8(&mut self, bus: &Peripherals, src: T) -> Option<u8>;
@@ -124,6 +124,7 @@ impl IO8<Imm8> for Cpu {
                 VAL8.store(bus.read(self.regs.pc), Relaxed);
                 self.regs.pc = self.regs.pc.wrapping_add(1);
                 go!(1);
+                return None;
             },
             1: {
                 go!(0);
