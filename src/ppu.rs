@@ -117,11 +117,19 @@ impl Ppu {
     }
 
     fn get_pixel_from_tile(&self, tile_idx: usize, row: u8, col: u8) -> u8 {
+        // 8x8タイルの1ピクセルを取得する
+        // 一行2byte
         let r = (row * 2) as usize;
+        //
         let c = (7 - col) as usize;
+
+        // 0x8000からのオフセットを計算
         let tile_addr = tile_idx * 16;
+
+        // 0x1FFFはVRAMのアドレス範囲
         let low = self.vram[(tile_addr | r) & 0x1FFF];
         let high = self.vram[(tile_addr | (r + 1)) & 0x1FFF];
+
         let pixel = ((low >> c) & 1) | (((high >> c) & 1) << 1);
         pixel
     }
