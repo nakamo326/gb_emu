@@ -133,4 +133,17 @@ impl Ppu {
         let pixel = ((low >> c) & 1) | (((high >> c) & 1) << 1);
         pixel
     }
+
+    fn get_tile_idx_from_tile_map(&self, tile_map: u8, row: u8, col: u8) -> usize {
+        // tile_mapは２つある
+        let tile_map_addr = if tile_map == 0 { 0x1800 } else { 0x1C00 };
+
+        let ret = self.vram[tile_map_addr + (row * 32 + col) as usize];
+
+        if self.lcdc & TILE_DATA_ADDRESSING_MODE > 0 {
+            ret as usize
+        } else {
+            ((ret as i8) as i16 + 128) as usize
+        }
+    }
 }
