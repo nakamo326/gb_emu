@@ -1,16 +1,18 @@
 // 128 bytes of high ram
-pub struct HRam(Box<[u8; 0x80]>);
+pub struct HRam {
+    val: [u8; 0x80],
+}
 
 impl HRam {
     pub fn new() -> Self {
-        Self(Box::new([0; 0x80]))
+        Self { val: [0; 0x80] }
     }
 
     pub fn read(&self, addr: u16) -> u8 {
-        self.0[(addr as usize) & 0x7f]
+        self.val[(addr as usize) & 0x7f]
     }
 
     pub fn write(&mut self, addr: u16, val: u8) {
-        self.0[(addr as usize) & 0x7f] = val;
+        self.val[(addr as usize) & 0x7f] = val;
     }
 }

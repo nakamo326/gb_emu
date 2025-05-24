@@ -1,16 +1,18 @@
 // work ram of 8KiB
-pub struct WRam(Box<[u8; 0x2000]>);
+pub struct WRam {
+    val: [u8; 0x2000],
+}
 
 impl WRam {
     pub fn new() -> Self {
-        Self(Box::new([0; 0x2000]))
+        Self { val: [0; 0x2000] }
     }
 
     pub fn read(&self, addr: u16) -> u8 {
-        self.0[(addr as usize) & 0x1fff]
+        self.val[(addr as usize) & 0x1fff]
     }
 
     pub fn write(&mut self, addr: u16, val: u8) {
-        self.0[(addr as usize) & 0x1fff] = val;
+        self.val[(addr as usize) & 0x1fff] = val;
     }
 }
