@@ -1,3 +1,5 @@
+use std::iter;
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Mode {
     HBlank,
@@ -21,8 +23,8 @@ const VBLANK_INT: u8 = 1 << 4;
 const HBLANK_INT: u8 = 1 << 3;
 const LYC_EQ_LY: u8 = 1 << 2;
 
-const LCD_WIDTH: usize = 160;
-const LCD_HEIGHT: usize = 144;
+pub const LCD_WIDTH: usize = 160;
+pub const LCD_HEIGHT: usize = 144;
 
 pub struct Ppu {
     mode: Mode,
@@ -145,7 +147,7 @@ impl Ppu {
         // tile_mapは２つある FIXME: bool???
         let tile_map_addr = if tile_map { 0x1C00 } else { 0x1800 };
 
-        let ret = self.vram[tile_map_addr + (row * 32 + col) as usize];
+        let ret = self.vram[tile_map_addr | (((row as usize) << 5) + col as usize)];
 
         if self.lcdc & TILE_DATA_ADDRESSING_MODE > 0 {
             ret as usize
@@ -219,14 +221,16 @@ impl Ppu {
                 self.check_lyc_eq_ly();
             }
             Mode::VBlank => {
+                self.ly += 1;
                 if self.ly > 153 {
                     self.ly = 0;
                     self.mode = Mode::OAMScan;
                     self.cycle = 20;
                     is_vsync = true;
                 } else {
-                    self.ly += 1;
+                    self.cycle = 114;
                 }
+                self.check_lyc_eq_ly();
             }
             Mode::OAMScan => {
                 self.mode = Mode::Drawing;
@@ -240,5 +244,12 @@ impl Ppu {
         }
 
         is_vsync
+    }
+
+    pub fn pixel_buffer(&self) -> Box<[u8]> {
+        self.buffer
+            .iter()
+            .flat_map(|&e| iter::repeat(e.into()).take(3))
+            .collect::<Box<[u8]>>()
     }
 }

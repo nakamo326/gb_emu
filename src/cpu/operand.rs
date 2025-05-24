@@ -1,8 +1,10 @@
 use super::{
     Cpu,
     instructions::{go, step},
-    peripherals::Peripherals,
 };
+
+use crate::peripherals::Peripherals;
+
 use std::sync::atomic::{AtomicU8, AtomicU16, Ordering::Relaxed};
 
 pub trait IO8<T: Copy> {

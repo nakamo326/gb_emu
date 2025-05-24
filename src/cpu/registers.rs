@@ -15,6 +15,9 @@ pub struct Registers {
 // AF，BC，DE，HL を 16 ビットレジスタとして扱う
 
 impl Registers {
+    pub fn new() -> Self {
+        Self::default()
+    }
     pub fn af(&self) -> u16 {
         (self.a as u16) << 8 | self.f as u16
     }

@@ -1,8 +1,9 @@
 use super::{
-    operand::{Cond, Direct16, Direct8, Imm16, Imm8, Indirect, Reg16, Reg8, IO8},
-    peripherals::Peripherals,
     Cpu,
+    operand::{Cond, Direct8, Direct16, IO8, Imm8, Imm16, Indirect, Reg8, Reg16},
 };
+
+use crate::peripherals::Peripherals;
 
 impl Cpu {
     pub fn decode(&mut self, bus: &mut Peripherals) {

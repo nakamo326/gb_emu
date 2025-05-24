@@ -1,9 +1,11 @@
 use super::{
-    operand::{Cond, Imm16, Imm8, Reg16, IO16, IO8},
-    peripherals::Peripherals,
     Cpu,
+    operand::{Cond, IO8, IO16, Imm8, Imm16, Reg16},
 };
-use std::sync::atomic::{AtomicU16, AtomicU8, Ordering::Relaxed};
+
+use crate::peripherals::Peripherals;
+
+use std::sync::atomic::{AtomicU8, AtomicU16, Ordering::Relaxed};
 
 macro_rules! step {
     ($d:expr, {$($c:tt : $e:expr,)*}) => {

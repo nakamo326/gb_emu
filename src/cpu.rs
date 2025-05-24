@@ -1,10 +1,9 @@
 mod decode;
 mod instructions;
 mod operand;
-mod peripherals;
 mod registers;
 
-use peripherals::Peripherals;
+use crate::peripherals::Peripherals;
 use registers::Registers;
 
 #[derive(Default)]
@@ -19,10 +18,18 @@ pub struct Cpu {
 }
 
 impl Cpu {
+    pub fn new() -> Self {
+        Self {
+            regs: Registers::new(),
+            ctx: Ctx::default(),
+        }
+    }
+
     pub fn fetch(&mut self, bus: &Peripherals) {
         self.ctx.opcode = bus.read(self.regs.pc);
         self.regs.pc = self.regs.pc.wrapping_add(1);
         self.ctx.cb = false;
+        println!("PC: {:04X} OP: {:02X}", self.regs.pc, self.ctx.opcode);
     }
 
     fn nop(&mut self, bus: &Peripherals) {
