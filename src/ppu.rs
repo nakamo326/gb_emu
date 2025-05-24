@@ -21,6 +21,9 @@ const VBLANK_INT: u8 = 1 << 4;
 const HBLANK_INT: u8 = 1 << 3;
 const LYC_EQ_LY: u8 = 1 << 2;
 
+const LCD_WIDTH: usize = 160;
+const LCD_HEIGHT: usize = 144;
+
 pub struct Ppu {
     mode: Mode,
     lcdc: u8,
@@ -36,6 +39,8 @@ pub struct Ppu {
     wx: u8,
     vram: Box<[u8; 0x2000]>,
     oam: Box<[u8; 0xA0]>,
+    buffer: Box<[u8; LCD_WIDTH * LCD_HEIGHT * 4]>,
+    cycle: u8,
 }
 
 impl Ppu {
@@ -53,8 +58,10 @@ impl Ppu {
             obp1: 0,
             wy: 0,
             wx: 0,
+            cycle: 20,
             vram: Box::new([0; 0x2000]),
             oam: Box::new([0; 0xA0]),
+            buffer: Box::new([0; LCD_WIDTH * LCD_HEIGHT * 4]),
         }
     }
 
@@ -134,9 +141,9 @@ impl Ppu {
         pixel
     }
 
-    fn get_tile_idx_from_tile_map(&self, tile_map: u8, row: u8, col: u8) -> usize {
-        // tile_mapは２つある
-        let tile_map_addr = if tile_map == 0 { 0x1800 } else { 0x1C00 };
+    fn get_tile_idx_from_tile_map(&self, tile_map: bool, row: u8, col: u8) -> usize {
+        // tile_mapは２つある FIXME: bool???
+        let tile_map_addr = if tile_map { 0x1C00 } else { 0x1800 };
 
         let ret = self.vram[tile_map_addr + (row * 32 + col) as usize];
 
@@ -144,6 +151,37 @@ impl Ppu {
             ret as usize
         } else {
             ((ret as i8) as i16 + 128) as usize
+        }
+    }
+
+    fn render_bg(&mut self) {
+        if self.lcdc & BG_WINDOW_ENABLE == 0 {
+            return;
+        }
+        let y = self.ly.wrapping_add(self.scy);
+        for i in 0..LCD_WIDTH {
+            let x = (i as u8).wrapping_add(self.scx);
+
+            let tile_row = y / 8;
+            let tile_col = x / 8;
+            let tile_map = self.lcdc & BG_TILE_MAP > 0;
+
+            let tile_idx =
+                self.get_tile_idx_from_tile_map(tile_map, tile_row as u8, tile_col as u8);
+
+            //
+            let pixel_row = y & 7;
+            let pixel_col = x & 7;
+
+            let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col);
+
+            self.buffer[LCD_WIDTH * self.ly as usize + i] = match (self.bgp >> (pixel << 1)) & 0b11
+            {
+                0b00 => 0xFF,
+                0b01 => 0xAA,
+                0b10 => 0x55,
+                _ => 0x00,
+            };
         }
     }
 }
