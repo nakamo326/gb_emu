@@ -184,4 +184,61 @@ impl Ppu {
             };
         }
     }
+
+    fn check_lyc_eq_ly(&mut self) {
+        if self.ly == self.lyc {
+            self.stat |= LYC_EQ_LY;
+        } else {
+            self.stat &= !LYC_EQ_LY;
+        }
+    }
+
+    pub fn emulate_cycle(&mut self) -> bool {
+        if self.lcdc & PPU_ENABLE == 0 {
+            return false;
+        }
+
+        self.cycle -= 1;
+        if self.cycle > 0 {
+            return false;
+        }
+
+        // vsyncであるかを示す変数
+        let mut is_vsync = false;
+
+        match self.mode {
+            Mode::HBlank => {
+                self.ly += 1;
+                if self.ly < 144 {
+                    self.mode = Mode::OAMScan;
+                    self.cycle = 20;
+                } else {
+                    self.mode = Mode::VBlank;
+                    self.cycle = 114;
+                }
+                self.check_lyc_eq_ly();
+            }
+            Mode::VBlank => {
+                if self.ly > 153 {
+                    self.ly = 0;
+                    self.mode = Mode::OAMScan;
+                    self.cycle = 20;
+                    is_vsync = true;
+                } else {
+                    self.ly += 1;
+                }
+            }
+            Mode::OAMScan => {
+                self.mode = Mode::Drawing;
+                self.cycle = 43;
+            }
+            Mode::Drawing => {
+                self.render_bg();
+                self.mode = Mode::HBlank;
+                self.cycle = 51;
+            }
+        }
+
+        is_vsync
+    }
 }
