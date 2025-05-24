@@ -1,10 +1,5 @@
 extern crate sdl2;
 
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
-use sdl2::pixels::Color;
-use std::time::Duration;
-
 mod bootrom;
 mod cpu;
 mod gameboy;
@@ -18,11 +13,11 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
-fn read_file_to_boxed_slice<P: AsRef<Path>>(path: P) -> io::Result<Box<[u8]>> {
+fn read_file_to_boxed_slice<P: AsRef<Path>>(path: P) -> io::Result<[u8; 0x100]> {
     let mut file = File::open(path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    Ok(buffer.into_boxed_slice())
+    let mut buffer = [0; 0x100];
+    file.read_exact(&mut buffer)?;
+    Ok(buffer)
 }
 
 pub fn main() -> Result<(), String> {

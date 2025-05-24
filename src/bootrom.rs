@@ -1,10 +1,10 @@
 pub struct Bootrom {
-    rom: Box<[u8]>,
+    rom: [u8; 0x100],
     active: bool,
 }
 
 impl Bootrom {
-    pub fn new(rom: Box<[u8]>) -> Self {
+    pub fn new(rom: [u8; 0x100]) -> Self {
         Self { rom, active: true }
     }
 
