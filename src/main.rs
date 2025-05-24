@@ -27,7 +27,6 @@ fn read_file_to_boxed_slice<P: AsRef<Path>>(path: P) -> io::Result<Box<[u8]>> {
 
 pub fn main() -> Result<(), String> {
     let bootrom = read_file_to_boxed_slice("dmg_bootrom.bin").unwrap();
-    println!("ファイル読み込み成功！サイズ: {}バイト", bootrom.len());
 
     let bootrom = bootrom::Bootrom::new(bootrom);
     let mut gameboy = gameboy::GameBoy::new(bootrom);

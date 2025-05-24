@@ -2,6 +2,7 @@ use crate::bootrom::Bootrom;
 use crate::cpu::Cpu;
 use crate::lcd::LCD;
 use crate::peripherals::Peripherals;
+use std::thread;
 use std::time;
 
 pub const CPU_CLOCK_HZ: u128 = 4_194_304;
@@ -37,6 +38,7 @@ impl GameBoy {
                 }
                 elapsed += M_CYCLE_NANOS;
             }
+            std::thread::sleep(time::Duration::from_nanos(M_CYCLE_NANOS as u64));
         }
     }
 }

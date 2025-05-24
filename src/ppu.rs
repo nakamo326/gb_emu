@@ -112,15 +112,15 @@ impl Ppu {
             }
             0xFF40 => self.lcdc = val,
             0xFF41 => self.stat = (self.stat & LYC_EQ_LY) | (val & 0xF8),
-            0xFF42 => {}
-            0xFF43 => {}
+            0xFF42 => self.scy = val,
+            0xFF43 => self.scx = val,
             0xFF44 => {}
-            0xFF45 => {}
-            0xFF47 => {}
-            0xFF48 => {}
-            0xFF49 => {}
-            0xFF4A => {}
-            0xFF4B => {}
+            0xFF45 => self.lyc = val,
+            0xFF47 => self.bgp = val,
+            0xFF48 => self.obp0 = val,
+            0xFF49 => self.obp1 = val,
+            0xFF4A => self.wy = val,
+            0xFF4B => self.wx = val,
             _ => unreachable!(),
         }
     }
@@ -133,7 +133,7 @@ impl Ppu {
         let c = (7 - col) as usize;
 
         // 0x8000からのオフセットを計算
-        let tile_addr = tile_idx * 16;
+        let tile_addr = tile_idx << 4;
 
         // 0x1FFFはVRAMのアドレス範囲
         let low = self.vram[(tile_addr | r) & 0x1FFF];

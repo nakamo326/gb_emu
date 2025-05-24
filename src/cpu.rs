@@ -29,7 +29,6 @@ impl Cpu {
         self.ctx.opcode = bus.read(self.regs.pc);
         self.regs.pc = self.regs.pc.wrapping_add(1);
         self.ctx.cb = false;
-        println!("PC: {:04X} OP: {:02X}", self.regs.pc, self.ctx.opcode);
     }
 
     fn nop(&mut self, bus: &Peripherals) {
