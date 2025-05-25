@@ -1,20 +1,22 @@
-use sdl2::Sdl;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
 
 use crate::ppu::{LCD_HEIGHT, LCD_WIDTH};
 
+const SCALE: u32 = 4;
+
 pub struct Lcd(Canvas<Window>);
 impl Lcd {
-    pub fn new(sdl: &Sdl, scale: u32) -> Self {
+    pub fn new() -> Self {
+        let sdl = sdl2::init().unwrap();
         let window = sdl
             .video()
             .unwrap()
             .window(
                 "Game Boy Emulator",
-                LCD_WIDTH as u32 * scale,
-                LCD_HEIGHT as u32 * scale,
+                LCD_WIDTH as u32 * SCALE,
+                LCD_HEIGHT as u32 * SCALE,
             )
             .position_centered()
             .build()

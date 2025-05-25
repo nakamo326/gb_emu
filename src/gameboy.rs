@@ -25,7 +25,6 @@ pub struct GameBoy {
 
 impl GameBoy {
     pub fn new(bootrom: Bootrom) -> Self {
-        let sdl = sdl2::init().unwrap();
         let wram = Rc::new(RefCell::new(WRam::new()));
         let hram = Rc::new(RefCell::new(HRam::new()));
         let ppu = Rc::new(RefCell::new(Ppu::new()));
@@ -37,7 +36,7 @@ impl GameBoy {
             hram,
             ppu,
             mmu,
-            lcd: Lcd::new(&sdl, 4),
+            lcd: Lcd::new(),
         }
     }
 
