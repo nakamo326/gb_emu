@@ -7,7 +7,7 @@ use crate::ppu::Ppu;
 use crate::wram::WRam;
 
 pub struct Mmu {
-    pub bootrom: Bootrom,
+    pub bootrom: Rc<RefCell<Bootrom>>,
     pub wram: Rc<RefCell<WRam>>,
     pub hram: Rc<RefCell<HRam>>,
     pub ppu: Rc<RefCell<Ppu>>,
@@ -15,7 +15,7 @@ pub struct Mmu {
 
 impl Mmu {
     pub fn new(
-        bootrom: Bootrom,
+        bootrom: Rc<RefCell<Bootrom>>,
         wram: Rc<RefCell<WRam>>,
         hram: Rc<RefCell<HRam>>,
         ppu: Rc<RefCell<Ppu>>,
@@ -31,8 +31,8 @@ impl Mmu {
     pub fn read(&self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x00FF => {
-                if self.bootrom.is_active() {
-                    self.bootrom.read(addr)
+                if self.bootrom.borrow().is_active() {
+                    self.bootrom.borrow().read(addr)
                 } else {
                     0xFF
                 }
@@ -52,7 +52,7 @@ impl Mmu {
             0xFE00..=0xFE9F => self.ppu.borrow_mut().write(addr, val),
             0xFF40..=0xFF4B => self.ppu.borrow_mut().write(addr, val),
             0xC000..=0xFDFF => self.wram.borrow_mut().write(addr, val),
-            0xFF50 => self.bootrom.write(addr, val),
+            0xFF50 => self.bootrom.borrow_mut().write(addr, val),
             0xFF80..=0xFFFE => self.hram.borrow_mut().write(addr, val),
             _ => (),
         }

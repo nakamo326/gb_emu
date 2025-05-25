@@ -16,6 +16,7 @@ const M_CYCLE_NANOS: u128 = M_CYCLE_CLOCK * 1_000_000_000 / CPU_CLOCK_HZ;
 
 pub struct GameBoy {
     cpu: Cpu,
+    bootrom: Rc<RefCell<Bootrom>>,
     wram: Rc<RefCell<WRam>>,
     hram: Rc<RefCell<HRam>>,
     ppu: Rc<RefCell<Ppu>>,
@@ -24,14 +25,16 @@ pub struct GameBoy {
 }
 
 impl GameBoy {
-    pub fn new(bootrom: Bootrom) -> Self {
+    pub fn new() -> Self {
+        let bootrom = Rc::new(RefCell::new(Bootrom::new("dmg_bootrom.bin")));
         let wram = Rc::new(RefCell::new(WRam::new()));
         let hram = Rc::new(RefCell::new(HRam::new()));
         let ppu = Rc::new(RefCell::new(Ppu::new()));
-        let mmu = Mmu::new(bootrom, wram.clone(), hram.clone(), ppu.clone());
+        let mmu = Mmu::new(bootrom.clone(), wram.clone(), hram.clone(), ppu.clone());
 
         Self {
             cpu: Cpu::new(),
+            bootrom,
             wram,
             hram,
             ppu,
