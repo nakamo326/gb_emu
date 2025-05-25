@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::bootrom::Bootrom;
 use crate::hram::HRam;
 use crate::ppu::Ppu;
@@ -5,18 +8,23 @@ use crate::wram::WRam;
 
 pub struct Mmu {
     pub bootrom: Bootrom,
-    pub wram: WRam,
-    pub hram: HRam,
-    pub ppu: Ppu,
+    pub wram: Rc<RefCell<WRam>>,
+    pub hram: Rc<RefCell<HRam>>,
+    pub ppu: Rc<RefCell<Ppu>>,
 }
 
 impl Mmu {
-    pub fn new(bootrom: Bootrom) -> Self {
+    pub fn new(
+        bootrom: Bootrom,
+        wram: Rc<RefCell<WRam>>,
+        hram: Rc<RefCell<HRam>>,
+        ppu: Rc<RefCell<Ppu>>,
+    ) -> Self {
         Self {
             bootrom,
-            wram: WRam::new(),
-            hram: HRam::new(),
-            ppu: Ppu::new(),
+            wram,
+            hram,
+            ppu,
         }
     }
 
@@ -29,23 +37,23 @@ impl Mmu {
                     0xFF
                 }
             }
-            0x8000..=0x9FFF => self.ppu.read(addr),
-            0xFE00..=0xFE9F => self.ppu.read(addr),
-            0xFF40..=0xFF4B => self.ppu.read(addr),
-            0xC000..=0xFDFF => self.wram.read(addr),
-            0xFF80..=0xFFFE => self.hram.read(addr),
+            0x8000..=0x9FFF => self.ppu.borrow().read(addr),
+            0xFE00..=0xFE9F => self.ppu.borrow().read(addr),
+            0xFF40..=0xFF4B => self.ppu.borrow().read(addr),
+            0xC000..=0xFDFF => self.wram.borrow().read(addr),
+            0xFF80..=0xFFFE => self.hram.borrow().read(addr),
             _ => 0xFF,
         }
     }
 
     pub fn write(&mut self, addr: u16, val: u8) {
         match addr {
-            0x8000..=0x9FFF => self.ppu.write(addr, val),
-            0xFE00..=0xFE9F => self.ppu.write(addr, val),
-            0xFF40..=0xFF4B => self.ppu.write(addr, val),
-            0xC000..=0xFDFF => self.wram.write(addr, val),
+            0x8000..=0x9FFF => self.ppu.borrow_mut().write(addr, val),
+            0xFE00..=0xFE9F => self.ppu.borrow_mut().write(addr, val),
+            0xFF40..=0xFF4B => self.ppu.borrow_mut().write(addr, val),
+            0xC000..=0xFDFF => self.wram.borrow_mut().write(addr, val),
             0xFF50 => self.bootrom.write(addr, val),
-            0xFF80..=0xFFFE => self.hram.write(addr, val),
+            0xFF80..=0xFFFE => self.hram.borrow_mut().write(addr, val),
             _ => (),
         }
     }
