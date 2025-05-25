@@ -1,5 +1,3 @@
-use std::iter;
-
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Mode {
     HBlank,
@@ -41,7 +39,7 @@ pub struct Ppu {
     wx: u8,
     vram: Box<[u8; 0x2000]>,
     oam: Box<[u8; 0xA0]>,
-    buffer: Box<[u8; LCD_WIDTH * LCD_HEIGHT * 4]>,
+    buffer: [u8; LCD_WIDTH * LCD_HEIGHT],
     cycle: u8,
 }
 
@@ -63,7 +61,7 @@ impl Ppu {
             cycle: 20,
             vram: Box::new([0; 0x2000]),
             oam: Box::new([0; 0xA0]),
-            buffer: Box::new([0; LCD_WIDTH * LCD_HEIGHT * 4]),
+            buffer: [0; LCD_WIDTH * LCD_HEIGHT],
         }
     }
 
@@ -177,13 +175,8 @@ impl Ppu {
 
             let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col);
 
-            self.buffer[LCD_WIDTH * self.ly as usize + i] = match (self.bgp >> (pixel << 1)) & 0b11
-            {
-                0b00 => 0xFF,
-                0b01 => 0xAA,
-                0b10 => 0x55,
-                _ => 0x00,
-            };
+            let palette_idx = (self.bgp >> (pixel << 1)) & 0b11;
+            self.buffer[LCD_WIDTH * self.ly as usize + i] = palette_idx;
         }
     }
 
@@ -249,7 +242,15 @@ impl Ppu {
     pub fn pixel_buffer(&self) -> Box<[u8]> {
         self.buffer
             .iter()
-            .flat_map(|&e| iter::repeat(e.into()).take(3))
+            .flat_map(|&e| {
+                let rgb = match e {
+                    0 => [0xE0, 0xF8, 0xD0],
+                    1 => [0x88, 0xC0, 0x70],
+                    2 => [0x34, 0x68, 0x56],
+                    _ => [0x0E, 0x18, 0x20],
+                };
+                rgb.into_iter()
+            })
             .collect::<Box<[u8]>>()
     }
 }
