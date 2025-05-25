@@ -7,10 +7,8 @@ mod mmu;
 mod ppu;
 mod wram;
 
-pub fn main() -> Result<(), String> {
+pub fn main() {
     let mut gameboy = gameboy::GameBoy::new();
 
     gameboy.run();
-
-    Ok(())
 }
