@@ -3,7 +3,7 @@ use super::{
     operand::{Cond, IO8, IO16, Imm8, Imm16, Reg16},
 };
 
-use crate::peripherals::Peripherals;
+use crate::mmu::Mmu;
 
 use std::sync::atomic::{AtomicU8, AtomicU16, Ordering::Relaxed};
 
@@ -27,7 +27,7 @@ macro_rules! go {
 pub(crate) use go;
 
 impl Cpu {
-    pub fn ld<D: Copy, S: Copy>(&mut self, bus: &mut Peripherals, dst: D, src: S)
+    pub fn ld<D: Copy, S: Copy>(&mut self, bus: &mut Mmu, dst: D, src: S)
     where
         Self: IO8<D> + IO8<S>,
     {
@@ -46,7 +46,7 @@ impl Cpu {
         });
     }
 
-    pub fn ld16<D: Copy, S: Copy>(&mut self, bus: &mut Peripherals, dst: D, src: S)
+    pub fn ld16<D: Copy, S: Copy>(&mut self, bus: &mut Mmu, dst: D, src: S)
     where
         Self: IO16<D> + IO16<S>,
     {
@@ -65,7 +65,7 @@ impl Cpu {
         });
     }
 
-    pub fn cp<S: Copy>(&mut self, bus: &mut Peripherals, src: S)
+    pub fn cp<S: Copy>(&mut self, bus: &mut Mmu, src: S)
     where
         Self: IO8<S>,
     {
@@ -79,7 +79,7 @@ impl Cpu {
         }
     }
 
-    pub fn inc<S: Copy>(&mut self, bus: &mut Peripherals, src: S)
+    pub fn inc<S: Copy>(&mut self, bus: &mut Mmu, src: S)
     where
         Self: IO8<S>,
     {
@@ -99,7 +99,7 @@ impl Cpu {
         });
     }
 
-    pub fn inc16<S: Copy>(&mut self, bus: &mut Peripherals, src: S)
+    pub fn inc16<S: Copy>(&mut self, bus: &mut Mmu, src: S)
     where
         Self: IO16<S>,
     {
@@ -118,7 +118,7 @@ impl Cpu {
         });
     }
 
-    pub fn dec<S: Copy>(&mut self, bus: &mut Peripherals, src: S)
+    pub fn dec<S: Copy>(&mut self, bus: &mut Mmu, src: S)
     where
         Self: IO8<S>,
     {
@@ -138,7 +138,7 @@ impl Cpu {
         });
     }
 
-    pub fn dec16<S: Copy>(&mut self, bus: &mut Peripherals, src: S)
+    pub fn dec16<S: Copy>(&mut self, bus: &mut Mmu, src: S)
     where
         Self: IO16<S>,
     {
@@ -157,7 +157,7 @@ impl Cpu {
         });
     }
 
-    pub fn rl<S: Copy>(&mut self, bus: &mut Peripherals, src: S)
+    pub fn rl<S: Copy>(&mut self, bus: &mut Mmu, src: S)
     where
         Self: IO8<S>,
     {
@@ -178,7 +178,7 @@ impl Cpu {
         });
     }
 
-    pub fn bit<S: Copy>(&mut self, bus: &mut Peripherals, bit: usize, src: S)
+    pub fn bit<S: Copy>(&mut self, bus: &mut Mmu, bit: usize, src: S)
     where
         Self: IO8<S>,
     {
@@ -190,7 +190,7 @@ impl Cpu {
         }
     }
 
-    pub fn push16(&mut self, bus: &mut Peripherals, val: u16) -> Option<()> {
+    pub fn push16(&mut self, bus: &mut Mmu, val: u16) -> Option<()> {
         step!(None, {
             0: {
                 go!(1);
@@ -217,7 +217,7 @@ impl Cpu {
         });
     }
 
-    pub fn push(&mut self, bus: &mut Peripherals, src: Reg16) {
+    pub fn push(&mut self, bus: &mut Mmu, src: Reg16) {
         step!((), {
             0:{
                 VAL16.store(self.read16(bus, src).unwrap(), Relaxed);
@@ -233,7 +233,7 @@ impl Cpu {
         });
     }
 
-    pub fn pop16(&mut self, bus: &mut Peripherals) -> Option<u16> {
+    pub fn pop16(&mut self, bus: &mut Mmu) -> Option<u16> {
         step!(None, {
             0: {
                 VAL8.store(bus.read(self.regs.sp), Relaxed);
@@ -255,14 +255,14 @@ impl Cpu {
         });
     }
 
-    pub fn pop(&mut self, bus: &mut Peripherals, dst: Reg16) {
+    pub fn pop(&mut self, bus: &mut Mmu, dst: Reg16) {
         if let Some(v) = self.pop16(bus) {
             self.write16(bus, dst, v);
             self.fetch(bus);
         }
     }
 
-    pub fn jr(&mut self, bus: &mut Peripherals) {
+    pub fn jr(&mut self, bus: &mut Mmu) {
         step!((), {
             0: if let Some(offset) = self.read8(bus, Imm8) {
                 self.regs.pc = self.regs.pc.wrapping_add(offset as i8 as u16);
@@ -284,7 +284,7 @@ impl Cpu {
         }
     }
 
-    pub fn jr_c(&mut self, bus: &mut Peripherals, c: Cond) {
+    pub fn jr_c(&mut self, bus: &mut Mmu, c: Cond) {
         step!((), {
             0: if let Some(offset) = self.read8(bus, Imm8) {
                 go!(1);
@@ -300,7 +300,7 @@ impl Cpu {
         });
     }
 
-    pub fn call(&mut self, bus: &mut Peripherals) {
+    pub fn call(&mut self, bus: &mut Mmu) {
         step!((), {
             0: if let Some(v) = self.read16(bus, Imm16) {
                 VAL16.store(v, Relaxed);
@@ -314,7 +314,7 @@ impl Cpu {
         });
     }
 
-    pub fn ret(&mut self, bus: &mut Peripherals) {
+    pub fn ret(&mut self, bus: &mut Mmu) {
         step!((), {
             0: if let Some(v) = self.pop16(bus) {
                 self.regs.pc = v;

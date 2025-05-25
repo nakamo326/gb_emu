@@ -3,14 +3,14 @@ use crate::hram::HRam;
 use crate::ppu::Ppu;
 use crate::wram::WRam;
 
-pub struct Peripherals {
+pub struct Mmu {
     pub bootrom: Bootrom,
     pub wram: WRam,
     pub hram: HRam,
     pub ppu: Ppu,
 }
 
-impl Peripherals {
+impl Mmu {
     pub fn new(bootrom: Bootrom) -> Self {
         Self {
             bootrom,

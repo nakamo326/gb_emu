@@ -3,10 +3,10 @@ use super::{
     operand::{Cond, Direct8, Direct16, IO8, Imm8, Imm16, Indirect, Reg8, Reg16},
 };
 
-use crate::peripherals::Peripherals;
+use crate::mmu::Mmu;
 
 impl Cpu {
-    pub fn decode(&mut self, bus: &mut Peripherals) {
+    pub fn decode(&mut self, bus: &mut Mmu) {
         if self.ctx.cb {
             self.cb_decode(bus);
             return;
@@ -206,7 +206,7 @@ impl Cpu {
         }
     }
 
-    fn cb_decode(&mut self, bus: &mut Peripherals) {
+    fn cb_decode(&mut self, bus: &mut Mmu) {
         match self.ctx.opcode {
             // 0x10 - 0x17
             0x10 => self.rl(bus, Reg8::B),
@@ -286,7 +286,7 @@ impl Cpu {
         }
     }
 
-    fn cb_prefixed(&mut self, bus: &mut Peripherals) {
+    fn cb_prefixed(&mut self, bus: &mut Mmu) {
         if let Some(v) = self.read8(bus, Imm8) {
             self.ctx.opcode = v;
             self.ctx.cb = true;

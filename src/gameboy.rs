@@ -3,7 +3,7 @@ use std::time;
 use crate::bootrom::Bootrom;
 use crate::cpu::Cpu;
 use crate::lcd::LCD;
-use crate::peripherals::Peripherals;
+use crate::mmu::Mmu;
 
 pub const CPU_CLOCK_HZ: u128 = 4_194_304;
 pub const M_CYCLE_CLOCK: u128 = 4;
@@ -11,7 +11,7 @@ const M_CYCLE_NANOS: u128 = M_CYCLE_CLOCK * 1_000_000_000 / CPU_CLOCK_HZ;
 
 pub struct GameBoy {
     cpu: Cpu,
-    peripherals: Peripherals,
+    peripherals: Mmu,
     lcd: LCD,
 }
 
@@ -21,7 +21,7 @@ impl GameBoy {
 
         Self {
             cpu: Cpu::new(),
-            peripherals: Peripherals::new(bootrom),
+            peripherals: Mmu::new(bootrom),
             lcd: LCD::new(&sdl, 4),
         }
     }

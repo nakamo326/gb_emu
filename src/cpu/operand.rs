@@ -3,18 +3,18 @@ use super::{
     instructions::{go, step},
 };
 
-use crate::peripherals::Peripherals;
+use crate::mmu::Mmu;
 
 use std::sync::atomic::{AtomicU8, AtomicU16, Ordering::Relaxed};
 
 pub trait IO8<T: Copy> {
-    fn read8(&mut self, bus: &Peripherals, src: T) -> Option<u8>;
-    fn write8(&mut self, bus: &mut Peripherals, dst: T, val: u8) -> Option<()>;
+    fn read8(&mut self, bus: &Mmu, src: T) -> Option<u8>;
+    fn write8(&mut self, bus: &mut Mmu, dst: T, val: u8) -> Option<()>;
 }
 
 pub trait IO16<T: Copy> {
-    fn read16(&mut self, bus: &Peripherals, src: T) -> Option<u16>;
-    fn write16(&mut self, bus: &mut Peripherals, dst: T, val: u16) -> Option<()>;
+    fn read16(&mut self, bus: &Mmu, src: T) -> Option<u16>;
+    fn write16(&mut self, bus: &mut Mmu, dst: T, val: u16) -> Option<()>;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -72,7 +72,7 @@ pub enum Cond {
 
 // レジスタのみの操作はcycleを消費しない
 impl IO8<Reg8> for Cpu {
-    fn read8(&mut self, _: &Peripherals, src: Reg8) -> Option<u8> {
+    fn read8(&mut self, _: &Mmu, src: Reg8) -> Option<u8> {
         match src {
             Reg8::A => Some(self.regs.a),
             Reg8::B => Some(self.regs.b),
@@ -84,7 +84,7 @@ impl IO8<Reg8> for Cpu {
         }
     }
 
-    fn write8(&mut self, _: &mut Peripherals, dst: Reg8, val: u8) -> Option<()> {
+    fn write8(&mut self, _: &mut Mmu, dst: Reg8, val: u8) -> Option<()> {
         match dst {
             Reg8::A => Some(self.regs.a = val),
             Reg8::B => Some(self.regs.b = val),
@@ -98,7 +98,7 @@ impl IO8<Reg8> for Cpu {
 }
 
 impl IO16<Reg16> for Cpu {
-    fn read16(&mut self, _: &Peripherals, src: Reg16) -> Option<u16> {
+    fn read16(&mut self, _: &Mmu, src: Reg16) -> Option<u16> {
         match src {
             Reg16::AF => Some(self.regs.af()),
             Reg16::BC => Some(self.regs.bc()),
@@ -108,7 +108,7 @@ impl IO16<Reg16> for Cpu {
         }
     }
 
-    fn write16(&mut self, _: &mut Peripherals, dst: Reg16, val: u16) -> Option<()> {
+    fn write16(&mut self, _: &mut Mmu, dst: Reg16, val: u16) -> Option<()> {
         match dst {
             Reg16::AF => Some(self.regs.write_af(val)),
             Reg16::BC => Some(self.regs.write_bc(val)),
@@ -120,7 +120,7 @@ impl IO16<Reg16> for Cpu {
 }
 
 impl IO8<Imm8> for Cpu {
-    fn read8(&mut self, bus: &Peripherals, _: Imm8) -> Option<u8> {
+    fn read8(&mut self, bus: &Mmu, _: Imm8) -> Option<u8> {
         step!(None, {
             0: {
                 VAL8.store(bus.read(self.regs.pc), Relaxed);
@@ -135,13 +135,13 @@ impl IO8<Imm8> for Cpu {
         });
     }
 
-    fn write8(&mut self, _: &mut Peripherals, _: Imm8, _: u8) -> Option<()> {
+    fn write8(&mut self, _: &mut Mmu, _: Imm8, _: u8) -> Option<()> {
         unreachable!()
     }
 }
 
 impl IO16<Imm16> for Cpu {
-    fn read16(&mut self, bus: &Peripherals, _: Imm16) -> Option<u16> {
+    fn read16(&mut self, bus: &Mmu, _: Imm16) -> Option<u16> {
         step!(None, {
             0: if let Some(lo) = self.read8(bus, Imm8) {
                 VAL8.store(lo, Relaxed);
@@ -158,13 +158,13 @@ impl IO16<Imm16> for Cpu {
         });
     }
 
-    fn write16(&mut self, _: &mut Peripherals, _: Imm16, _: u16) -> Option<()> {
+    fn write16(&mut self, _: &mut Mmu, _: Imm16, _: u16) -> Option<()> {
         unreachable!()
     }
 }
 
 impl IO8<Indirect> for Cpu {
-    fn read8(&mut self, bus: &Peripherals, src: Indirect) -> Option<u8> {
+    fn read8(&mut self, bus: &Mmu, src: Indirect) -> Option<u8> {
         step!(None, {
             0: {
                 VAL8.store(match src {
@@ -193,7 +193,7 @@ impl IO8<Indirect> for Cpu {
         });
     }
 
-    fn write8(&mut self, bus: &mut Peripherals, dst: Indirect, val: u8) -> Option<()> {
+    fn write8(&mut self, bus: &mut Mmu, dst: Indirect, val: u8) -> Option<()> {
         step!(None, {
             0: {
                 match dst {
@@ -224,7 +224,7 @@ impl IO8<Indirect> for Cpu {
 }
 
 impl IO8<Direct8> for Cpu {
-    fn read8(&mut self, bus: &Peripherals, src: Direct8) -> Option<u8> {
+    fn read8(&mut self, bus: &Mmu, src: Direct8) -> Option<u8> {
         step!(None, {
             0: if let Some(lo) = self.read8(bus, Imm8) {
                 VAL8.store(lo, Relaxed);
@@ -250,7 +250,7 @@ impl IO8<Direct8> for Cpu {
         });
     }
 
-    fn write8(&mut self, bus: &mut Peripherals, dst: Direct8, val: u8) -> Option<()> {
+    fn write8(&mut self, bus: &mut Mmu, dst: Direct8, val: u8) -> Option<()> {
         step!(None, {
             0: if let Some(lo) = self.read8(bus, Imm8) {
                 VAL8.store(lo, Relaxed);
@@ -278,11 +278,11 @@ impl IO8<Direct8> for Cpu {
 }
 
 impl IO16<Direct16> for Cpu {
-    fn read16(&mut self, _: &Peripherals, _: Direct16) -> Option<u16> {
+    fn read16(&mut self, _: &Mmu, _: Direct16) -> Option<u16> {
         unreachable!()
     }
 
-    fn write16(&mut self, bus: &mut Peripherals, _: Direct16, val: u16) -> Option<()> {
+    fn write16(&mut self, bus: &mut Mmu, _: Direct16, val: u16) -> Option<()> {
         step!(None, {
             0: if let Some(lo) = self.read8(bus,Imm8) {
                 VAL8.store(lo, Relaxed);

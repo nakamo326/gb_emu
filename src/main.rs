@@ -5,7 +5,7 @@ mod cpu;
 mod gameboy;
 mod hram;
 mod lcd;
-mod peripherals;
+mod mmu;
 mod ppu;
 mod wram;
 
