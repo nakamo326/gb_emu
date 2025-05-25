@@ -1,9 +1,9 @@
+use std::time;
+
 use crate::bootrom::Bootrom;
 use crate::cpu::Cpu;
 use crate::lcd::LCD;
 use crate::peripherals::Peripherals;
-use std::thread;
-use std::time;
 
 pub const CPU_CLOCK_HZ: u128 = 4_194_304;
 pub const M_CYCLE_CLOCK: u128 = 4;
