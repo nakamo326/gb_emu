@@ -1,5 +1,3 @@
-extern crate sdl2;
-
 mod bootrom;
 mod cpu;
 mod gameboy;
