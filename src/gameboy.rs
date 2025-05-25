@@ -5,7 +5,7 @@ use std::time;
 use crate::bootrom::Bootrom;
 use crate::cpu::Cpu;
 use crate::hram::HRam;
-use crate::lcd::LCD;
+use crate::lcd::Lcd;
 use crate::mmu::Mmu;
 use crate::ppu::Ppu;
 use crate::wram::WRam;
@@ -20,7 +20,7 @@ pub struct GameBoy {
     hram: Rc<RefCell<HRam>>,
     ppu: Rc<RefCell<Ppu>>,
     mmu: Mmu,
-    lcd: LCD,
+    lcd: Lcd,
 }
 
 impl GameBoy {
@@ -37,7 +37,7 @@ impl GameBoy {
             hram,
             ppu,
             mmu,
-            lcd: LCD::new(&sdl, 4),
+            lcd: Lcd::new(&sdl, 4),
         }
     }
 

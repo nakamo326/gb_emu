@@ -5,8 +5,8 @@ use sdl2::video::Window;
 
 use crate::ppu::{LCD_HEIGHT, LCD_WIDTH};
 
-pub struct LCD(Canvas<Window>);
-impl LCD {
+pub struct Lcd(Canvas<Window>);
+impl Lcd {
     pub fn new(sdl: &Sdl, scale: u32) -> Self {
         let window = sdl
             .video()
