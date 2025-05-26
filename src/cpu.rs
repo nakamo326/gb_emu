@@ -31,10 +31,6 @@ impl Cpu {
         self.ctx.cb = false;
     }
 
-    fn nop(&mut self, bus: &Mmu) {
-        self.fetch(bus);
-    }
-
     pub fn emulate_cycle(&mut self, bus: &mut Mmu) {
         self.decode(bus);
     }

@@ -27,6 +27,10 @@ macro_rules! go {
 pub(crate) use go;
 
 impl Cpu {
+    pub fn nop(&mut self, bus: &mut Mmu) {
+        self.fetch(bus);
+    }
+
     pub fn ld<D: Copy, S: Copy>(&mut self, bus: &mut Mmu, dst: D, src: S)
     where
         Self: IO8<D> + IO8<S>,
