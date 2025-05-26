@@ -239,18 +239,7 @@ impl Ppu {
         is_vsync
     }
 
-    pub fn pixel_buffer(&self) -> Box<[u8]> {
-        self.buffer
-            .iter()
-            .flat_map(|&e| {
-                let rgb = match e {
-                    0 => [0xE0, 0xF8, 0xD0],
-                    1 => [0x88, 0xC0, 0x70],
-                    2 => [0x34, 0x68, 0x56],
-                    _ => [0x0E, 0x18, 0x20],
-                };
-                rgb.into_iter()
-            })
-            .collect::<Box<[u8]>>()
+    pub fn pixel_buffer(&self) -> &[u8] {
+        &self.buffer
     }
 }

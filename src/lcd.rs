@@ -9,8 +9,8 @@ const SCALE: u32 = 4;
 pub struct Lcd(Canvas<Window>);
 impl Lcd {
     pub fn new() -> Self {
-        let sdl = sdl2::init().unwrap();
-        let window = sdl
+        let window = sdl2::init()
+            .unwrap()
             .video()
             .unwrap()
             .window(
@@ -27,13 +27,26 @@ impl Lcd {
         Self(canvas)
     }
 
-    pub fn draw(&mut self, pixels: Box<[u8]>) {
+    pub fn draw(&mut self, buffer: &[u8]) {
+        let rgb_buffer: Vec<u8> = buffer
+            .iter()
+            .flat_map(|&palette_idx| {
+                let rgb = match palette_idx {
+                    0 => [0xE0, 0xF8, 0xD0],
+                    1 => [0x88, 0xC0, 0x70],
+                    2 => [0x34, 0x68, 0x56],
+                    _ => [0x0E, 0x18, 0x20],
+                };
+                rgb.into_iter()
+            })
+            .collect();
+
         let texture_creator = self.0.texture_creator();
         let mut texture = texture_creator
-            .create_texture_target(PixelFormatEnum::RGB24, LCD_WIDTH as u32, LCD_HEIGHT as u32)
+            .create_texture_streaming(PixelFormatEnum::RGB24, LCD_WIDTH as u32, LCD_HEIGHT as u32)
             .unwrap();
 
-        texture.update(None, &pixels, LCD_WIDTH * 3).unwrap();
+        texture.update(None, &rgb_buffer, LCD_WIDTH * 3).unwrap();
         self.0.clear();
         self.0.copy(&texture, None, None).unwrap();
         self.0.present();
