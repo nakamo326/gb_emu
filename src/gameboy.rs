@@ -30,7 +30,12 @@ impl GameBoy {
         let wram = Rc::new(RefCell::new(WRam::new()));
         let hram = Rc::new(RefCell::new(HRam::new()));
         let ppu = Rc::new(RefCell::new(Ppu::new()));
-        let mmu = Mmu::new(bootrom.clone(), wram.clone(), hram.clone(), ppu.clone());
+        let mmu = Mmu {
+            bootrom: bootrom.clone(),
+            wram: wram.clone(),
+            hram: hram.clone(),
+            ppu: ppu.clone(),
+        };
 
         Self {
             cpu: Cpu::new(),

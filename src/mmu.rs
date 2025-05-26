@@ -14,20 +14,6 @@ pub struct Mmu {
 }
 
 impl Mmu {
-    pub fn new(
-        bootrom: Rc<RefCell<Bootrom>>,
-        wram: Rc<RefCell<WRam>>,
-        hram: Rc<RefCell<HRam>>,
-        ppu: Rc<RefCell<Ppu>>,
-    ) -> Self {
-        Self {
-            bootrom,
-            wram,
-            hram,
-            ppu,
-        }
-    }
-
     pub fn read(&self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x00FF => {
