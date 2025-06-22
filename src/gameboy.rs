@@ -1,8 +1,8 @@
 use std::time;
 
 use crate::cpu::Cpu;
-use crate::lcd::Lcd;
 use crate::mmu::Mmu;
+use crate::renderer::Renderer;
 
 pub const CPU_CLOCK_HZ: u128 = 4_194_304;
 pub const M_CYCLE_CLOCK: u128 = 4;
@@ -11,15 +11,15 @@ const M_CYCLE_NANOS: u128 = M_CYCLE_CLOCK * 1_000_000_000 / CPU_CLOCK_HZ;
 pub struct GameBoy {
     cpu: Cpu,
     mmu: Mmu,
-    lcd: Lcd,
+    lcd: Box<dyn Renderer>,
 }
 
 impl GameBoy {
-    pub fn new() -> Self {
+    pub fn new(lcd: Box<dyn Renderer>) -> Self {
         Self {
             cpu: Cpu::new(),
             mmu: Mmu::new(),
-            lcd: Lcd::new(),
+            lcd,
         }
     }
 

@@ -3,6 +3,7 @@ use sdl2::render::Canvas;
 use sdl2::video::Window;
 
 use crate::ppu::{LCD_HEIGHT, LCD_WIDTH};
+use crate::renderer::Renderer;
 
 const SCALE: u32 = 4;
 
@@ -26,8 +27,10 @@ impl Lcd {
 
         Self(canvas)
     }
+}
 
-    pub fn draw(&mut self, buffer: &[u8]) {
+impl Renderer for Lcd {
+    fn draw(&mut self, buffer: &[u8]) {
         let rgb_buffer: Vec<u8> = buffer
             .iter()
             .flat_map(|&palette_idx| {
