@@ -1,31 +1,47 @@
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
+use sdl2::Sdl;
 
 use crate::ppu::{LCD_HEIGHT, LCD_WIDTH};
 use crate::renderer::Renderer;
 
 const SCALE: u32 = 4;
 
-pub struct Lcd(Canvas<Window>);
+pub struct Lcd {
+    canvas: Canvas<Window>,
+    #[allow(dead_code)]
+    sdl_context: Sdl,
+}
+
 impl Lcd {
     pub fn new() -> Self {
-        let window = sdl2::init()
-            .unwrap()
-            .video()
-            .unwrap()
+        let sdl_context = sdl2::init().unwrap();
+        let video_subsystem = sdl_context.video().unwrap();
+        
+        let window = video_subsystem
             .window(
                 "Game Boy Emulator",
                 LCD_WIDTH as u32 * SCALE,
                 LCD_HEIGHT as u32 * SCALE,
             )
             .position_centered()
+            .resizable()
             .build()
             .unwrap();
 
-        let canvas = window.into_canvas().build().unwrap();
+        let mut canvas = window
+            .into_canvas()
+            .accelerated()
+            .present_vsync()
+            .build()
+            .unwrap();
+            
+        canvas.set_draw_color(sdl2::pixels::Color::RGB(0x0E, 0x18, 0x20));
+        canvas.clear();
+        canvas.present();
 
-        Self(canvas)
+        Self { canvas, sdl_context }
     }
 }
 
@@ -44,14 +60,15 @@ impl Renderer for Lcd {
             })
             .collect();
 
-        let texture_creator = self.0.texture_creator();
+        let texture_creator = self.canvas.texture_creator();
         let mut texture = texture_creator
             .create_texture_streaming(PixelFormatEnum::RGB24, LCD_WIDTH as u32, LCD_HEIGHT as u32)
             .unwrap();
 
         texture.update(None, &rgb_buffer, LCD_WIDTH * 3).unwrap();
-        self.0.clear();
-        self.0.copy(&texture, None, None).unwrap();
-        self.0.present();
+        self.canvas.clear();
+        self.canvas.copy(&texture, None, None).unwrap();
+        self.canvas.present();
     }
+
 }
