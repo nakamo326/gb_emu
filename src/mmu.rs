@@ -1,10 +1,12 @@
 use crate::bootrom::Bootrom;
+use crate::cartridge::Cartridge;
 use crate::hram::HRam;
 use crate::ppu::Ppu;
 use crate::wram::WRam;
 
 pub struct Mmu {
     pub bootrom: Bootrom,
+    pub cartridge: Option<Cartridge>,
     pub wram: WRam,
     pub hram: HRam,
     pub ppu: Ppu,
@@ -19,10 +21,17 @@ impl Mmu {
 
         Self {
             bootrom,
+            cartridge: None,
             wram,
             hram,
             ppu,
         }
+    }
+
+    pub fn load_cartridge(&mut self, rom_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let cartridge = Cartridge::new(rom_path)?;
+        self.cartridge = Some(cartridge);
+        Ok(())
     }
 
     pub fn read(&self, addr: u16) -> u8 {
@@ -30,6 +39,15 @@ impl Mmu {
             0x0000..=0x00FF => {
                 if self.bootrom.is_active() {
                     self.bootrom.read(addr)
+                } else if let Some(cartridge) = &self.cartridge {
+                    cartridge.read(addr)
+                } else {
+                    0xFF
+                }
+            }
+            0x0100..=0x7FFF | 0xA000..=0xBFFF => {
+                if let Some(cartridge) = &self.cartridge {
+                    cartridge.read(addr)
                 } else {
                     0xFF
                 }
@@ -45,6 +63,11 @@ impl Mmu {
 
     pub fn write(&mut self, addr: u16, val: u8) {
         match addr {
+            0x0000..=0x7FFF | 0xA000..=0xBFFF => {
+                if let Some(cartridge) = &mut self.cartridge {
+                    cartridge.write(addr, val);
+                }
+            }
             0x8000..=0x9FFF => self.ppu.write(addr, val),
             0xFE00..=0xFE9F => self.ppu.write(addr, val),
             0xFF40..=0xFF4B => self.ppu.write(addr, val),

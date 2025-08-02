@@ -23,6 +23,10 @@ impl GameBoy {
         }
     }
 
+    pub fn load_cartridge(&mut self, rom_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        self.mmu.load_cartridge(rom_path)
+    }
+
     pub fn run(&mut self) {
         let time = time::Instant::now();
         let mut elapsed = 0;
