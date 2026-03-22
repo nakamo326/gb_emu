@@ -171,6 +171,14 @@ impl Mmu {
             }
             0xFF04..=0xFF07 => self.timer.write(addr, val),
             0xFF0F => self.if_ = val & 0x1F,
+            0xFF46 => {
+                // OAM DMA転送: src_base * 0x100 から 0xFE00 へ 160バイトコピー
+                let src = (val as u16) << 8;
+                for i in 0..0xA0u16 {
+                    let byte = self.read(src + i);
+                    self.ppu.write(0xFE00 + i, byte);
+                }
+            }
             0xFF40..=0xFF4B => self.ppu.write(addr, val),
             0xC000..=0xFDFF => self.wram.write(addr, val),
             0xFF50 => self.bootrom.write(addr, val),

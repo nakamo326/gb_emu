@@ -257,7 +257,7 @@ impl Cpu {
             0xFB => self.ei(bus),
             0xFE => self.cp(bus, Imm8),
             0xFF => self.rst(bus, 0x38),
-            _ => unimplemented!("opcode: {:#04x}", self.ctx.opcode),
+            _ => self.fetch(bus), // illegal opcode: NOPとして扱う
         }
     }
 

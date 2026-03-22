@@ -114,7 +114,7 @@ impl Ppu {
             0xFF49 => self.obp1,
             0xFF4A => self.wy,
             0xFF4B => self.wx,
-            _ => unreachable!(),
+            _ => 0xFF,
         }
     }
 
@@ -139,9 +139,10 @@ impl Ppu {
             0xFF47 => self.bgp = val,
             0xFF48 => self.obp0 = val,
             0xFF49 => self.obp1 = val,
+            0xFF46 => {} // DMA転送はMMU側で処理済み
             0xFF4A => self.wy = val,
             0xFF4B => self.wx = val,
-            _ => unreachable!(),
+            _ => {}
         }
     }
 
@@ -172,7 +173,9 @@ impl Ppu {
         if self.lcdc & TILE_DATA_ADDRESSING_MODE > 0 {
             ret as usize
         } else {
-            ((ret as i8) as i16 + 128) as usize
+            // 0x8800アドレッシングモード: タイル番号は符号付き、ベースは0x9000 (VRAM offset 0x1000)
+            // tile_idx = 0x100 + (signed_byte) なので VRAM offset = tile_idx * 16 = 0x1000 + signed * 16
+            (0x100i16 + (ret as i8) as i16) as usize
         }
     }
 
