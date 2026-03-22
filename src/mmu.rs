@@ -1,6 +1,8 @@
 use crate::bootrom::Bootrom;
 use crate::cartridge::Cartridge;
 use crate::hram::HRam;
+use crate::input::ButtonState;
+use crate::joypad::Joypad;
 use crate::ppu::Ppu;
 use crate::timer::Timer;
 use crate::wram::WRam;
@@ -12,6 +14,7 @@ pub struct Mmu {
     pub hram: HRam,
     pub ppu: Ppu,
     pub timer: Timer,
+    pub joypad: Joypad,
     /// 割り込みフラグ (0xFF0F)
     pub if_: u8,
     /// 割り込み許可 (0xFFFF)
@@ -31,6 +34,7 @@ impl Mmu {
         let hram = HRam::new();
         let ppu = Ppu::new();
         let timer = Timer::new();
+        let joypad = Joypad::new();
 
         Self {
             bootrom,
@@ -39,6 +43,7 @@ impl Mmu {
             hram,
             ppu,
             timer,
+            joypad,
             if_: 0,
             ie: 0,
             serial_data: 0,
@@ -62,6 +67,13 @@ impl Mmu {
         // 割り込み
         self.if_ = 0xE1;
         self.ie = 0x00;
+    }
+
+    /// ボタン状態を更新し、新たに押下があれば Joypad 割り込みフラグをセットする
+    pub fn update_joypad(&mut self, state: &ButtonState) {
+        if self.joypad.update(state) {
+            self.if_ |= 0x10; // Joypad 割り込み
+        }
     }
 
     pub fn load_cartridge(&mut self, rom_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -90,7 +102,7 @@ impl Mmu {
             }
             0x8000..=0x9FFF => self.ppu.read(addr),
             0xFE00..=0xFE9F => self.ppu.read(addr),
-            0xFF00 => 0xFF, // ジョイパッド（未実装、全ボタン未押下）
+            0xFF00 => self.joypad.read(),
             0xFF01 => self.serial_data,
             0xFF02 => 0x7E, // シリアル制御（転送完了）
             0xFF04..=0xFF07 => self.timer.read(addr),
@@ -113,7 +125,7 @@ impl Mmu {
             }
             0x8000..=0x9FFF => self.ppu.write(addr, val),
             0xFE00..=0xFE9F => self.ppu.write(addr, val),
-            0xFF00 => {} // ジョイパッド（未実装）
+            0xFF00 => self.joypad.write(val),
             0xFF01 => self.serial_data = val,
             0xFF02 => {
                 // シリアル転送: bit7 がセットされたら文字を出力（blargg テスト用）

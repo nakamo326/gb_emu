@@ -1,10 +1,14 @@
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::Canvas;
 use sdl2::video::Window;
+use sdl2::EventPump;
 use sdl2::Sdl;
 
+use crate::backend::Backend;
+use crate::input::ButtonState;
 use crate::ppu::{LCD_HEIGHT, LCD_WIDTH};
-use crate::renderer::Renderer;
 
 const SCALE: u32 = 4;
 
@@ -12,13 +16,15 @@ pub struct Lcd {
     canvas: Canvas<Window>,
     #[allow(dead_code)]
     sdl_context: Sdl,
+    event_pump: EventPump,
 }
 
 impl Lcd {
     pub fn new() -> Self {
         let sdl_context = sdl2::init().unwrap();
         let video_subsystem = sdl_context.video().unwrap();
-        
+        let event_pump = sdl_context.event_pump().unwrap();
+
         let window = video_subsystem
             .window(
                 "Game Boy Emulator",
@@ -36,16 +42,16 @@ impl Lcd {
             .present_vsync()
             .build()
             .unwrap();
-            
+
         canvas.set_draw_color(sdl2::pixels::Color::RGB(0x0E, 0x18, 0x20));
         canvas.clear();
         canvas.present();
 
-        Self { canvas, sdl_context }
+        Self { canvas, sdl_context, event_pump }
     }
 }
 
-impl Renderer for Lcd {
+impl Backend for Lcd {
     fn draw(&mut self, buffer: &[u8]) {
         let rgb_buffer: Vec<u8> = buffer
             .iter()
@@ -71,4 +77,28 @@ impl Renderer for Lcd {
         self.canvas.present();
     }
 
+    fn poll(&mut self) -> ButtonState {
+        let mut state = ButtonState::default();
+        for event in self.event_pump.poll_iter() {
+            if let Event::Quit { .. } = event {
+                state.quit = true;
+            }
+        }
+        let keys: std::collections::HashSet<Keycode> = self
+            .event_pump
+            .keyboard_state()
+            .pressed_scancodes()
+            .filter_map(Keycode::from_scancode)
+            .collect();
+
+        state.a = keys.contains(&Keycode::Z);
+        state.b = keys.contains(&Keycode::X);
+        state.start = keys.contains(&Keycode::Return);
+        state.select = keys.contains(&Keycode::RShift);
+        state.up = keys.contains(&Keycode::Up);
+        state.down = keys.contains(&Keycode::Down);
+        state.left = keys.contains(&Keycode::Left);
+        state.right = keys.contains(&Keycode::Right);
+        state
+    }
 }

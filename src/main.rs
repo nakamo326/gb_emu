@@ -1,8 +1,11 @@
+mod backend;
 mod bootrom;
 mod cartridge;
 mod cpu;
 mod gameboy;
 mod hram;
+mod input;
+mod joypad;
 mod lcd;
 mod mmu;
 mod ppu;
@@ -13,13 +16,13 @@ mod wram;
 pub fn main() {
     let headless = std::env::args().any(|a| a == "--headless");
 
-    let lcd: Box<dyn renderer::Renderer> = if headless {
-        Box::new(renderer::NullRenderer)
+    let backend: Box<dyn backend::Backend> = if headless {
+        Box::new(backend::NullBackend)
     } else {
         Box::new(lcd::Lcd::new())
     };
 
-    let mut gameboy = gameboy::GameBoy::new(lcd, headless);
+    let mut gameboy = gameboy::GameBoy::new(backend, headless);
 
     // blargg テスト ROM を優先ロード
     if gameboy.load_cartridge("blargg/instr_timing.gb").is_ok() {
