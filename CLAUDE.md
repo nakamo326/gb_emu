@@ -1,113 +1,58 @@
 # CLAUDE.md
 
-このファイルは、このリポジトリでコードを扱う際のClaude Code (claude.ai/code) へのガイダンスを提供します。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 **重要: このプロジェクトでは日本語で回答してください。**
 
-## プロジェクト概要
-
-これはRustで書かれたゲームボーイエミュレータで、オリジナルのゲームボーイハードウェアのコアコンポーネントを実装しています。エミュレータはゲームボーイの4.194304 MHzのCPUクロック周波数に従い、M-cycle（4クロックサイクルずつ）で本格的なタイミングを実装しています。
-
-## ビルドシステム
-
-標準的なRust/Cargoプロジェクト:
+## ビルドと実行
 
 ```bash
-# プロジェクトをビルド
 cargo build
-
-# エミュレータを実行
 cargo run
-
-# 最適化されたリリース版をビルド
 cargo build --release
-
-# テストを実行
 cargo test
-
-# ビルドせずにコードをチェック
 cargo check
 ```
 
-## コアアーキテクチャ
+実行には作業ディレクトリに `dmg_bootrom.bin` が必要。起動時に `test_rom.gb` または `cpu_instrs.gb` があれば自動ロードする。
 
-### メインコンポーネント
+## アーキテクチャ
 
-- **GameBoy** (`src/gameboy.rs`): CPU、MMU、レンダリングを本格的なタイミングで統括するメインエミュレータ構造体
-- **CPU** (`src/cpu.rs`): 命令デコード/実行サイクルを持つZ80ライクプロセッサ実装
-- **MMU** (`src/mmu.rs`): メモリマップドI/Oとアドレスデコーディングを処理するメモリ管理ユニット
-- **PPU** (`src/ppu.rs`): ゲームボーイのグラフィックスレンダリングパイプラインを実装するピクチャープロセッシングユニット
-- **Renderer** (`src/renderer.rs`): ターミナル出力実装を含むトレイトベースのレンダリングシステム
+### メインループ（`src/gameboy.rs`）
 
-### メモリコンポーネント
+`GameBoy` 構造体がCPU・MMU・レンダラーを統括。ループはナノ秒精度でM-cycleタイミング（954ns/cycle）に同期し、毎サイクルCPUとPPUを1ステップ進める。PPUがフレーム完成を通知したときのみ `Renderer::draw()` を呼ぶ。
 
-- **Bootrom** (`src/bootrom.rs`): ブートROM実装（`dmg_bootrom.bin`から読み込み）
-- **WRAM** (`src/wram.rs`): ワーキングRAM（0xC000-0xFDFF）
-- **HRAM** (`src/hram.rs`): 高速RAM（0xFF80-0xFFFE）
+### CPU（`src/cpu.rs` + `src/cpu/`）
 
-### CPU実装
+- `Cpu::emulate_cycle()` → `decode()` の順で実行
+- `Ctx` 構造体がデコード中のオペコードと CB プレフィックスフラグを保持
+- サブモジュール: `decode.rs`（デコード）、`instructions.rs`（命令実装）、`operand.rs`、`registers.rs`
 
-CPUは個別のモジュールを持つモジュラー設計を使用:
-- `cpu/decode.rs`: 命令デコーディングロジック
-- `cpu/instructions.rs`: 命令実装
-- `cpu/operand.rs`: オペランド処理
-- `cpu/registers.rs`: レジスタファイル実装
+### MMU（`src/mmu.rs`）
 
-### メモリマップ
+アドレスデコードして各コンポーネントに委譲：
 
-MMUは適切なアドレスデコーディングでゲームボーイのメモリマップを実装:
-- 0x0000-0x00FF: ブートROM（アクティブ時）
-- 0x8000-0x9FFF: VRAM（PPU）
-- 0xC000-0xFDFF: WRAM
-- 0xFE00-0xFE9F: OAM（PPU）
-- 0xFF40-0xFF4B: PPUレジスタ
-- 0xFF50: ブートROM無効化レジスタ
-- 0xFF80-0xFFFE: HRAM
+| アドレス | コンポーネント |
+|---|---|
+| 0x0000–0x00FF | Bootrom（アクティブ時）or カートリッジ |
+| 0x0100–0x7FFF, 0xA000–0xBFFF | カートリッジ（MBC経由） |
+| 0x8000–0x9FFF, 0xFE00–0xFE9F, 0xFF40–0xFF4B | PPU |
+| 0xC000–0xFDFF | WRAM |
+| 0xFF50 | Bootrom無効化レジスタ |
+| 0xFF80–0xFFFE | HRAM |
 
-### PPU実装
+### カートリッジ / MBC（`src/cartridge.rs`）
 
-PPUはゲームボーイのグラフィックスパイプラインを実装:
-- 本格的なPPUモード（HBlank、VBlank、OAMScan、Drawing）
-- 各モードの適切なタイミングサイクル
-- タイルマップとタイルデータを使用した背景レンダリング
-- 異なるモード中のメモリアクセス制限
-- 160x144ピクセルバッファ出力
+`MemoryBankController` トレイトで抽象化。実装済み: `RomOnly`、`Mbc1`。未対応MBC（MBC3、MBC5等）は暫定的に `RomOnly` にフォールバック。
 
-### レンダリングシステム
+### PPU（`src/ppu.rs`）
 
-複数のレンダラー実装を可能にするトレイトベース設計:
-- `TerminalRenderer`: ピクセルにASCII文字を使用してターミナルに出力
-- Rendererトレイトにより、SDL2、OpenGL、その他のバックエンドの追加が容易
+モード遷移: OAMScan → Drawing → HBlank → (144行で) VBlank。160×144ピクセルバッファ（パレットインデックス0–3）を出力。`emulate_cycle()` がフレーム完成時に `true` を返す。
 
-## 開発ノート
+### レンダリング（`src/renderer.rs`、`src/lcd.rs`）
 
-### タイミング
+`Renderer` トレイト（`draw(&[u8])`）を実装：
+- **`Lcd`**（`lcd.rs`）: SDL2でウィンドウ表示。スケール4倍。デフォルト使用。
+- **`TerminalRenderer`**（`renderer.rs`）: ASCIIアートでターミナル出力。`main.rs` でコメントアウト中。
 
-エミュレータは本格的なゲームボーイタイミングを実装:
-- CPUは4.194304 MHzで動作
-- M-cycleは4クロックサイクル
-- メインループはナノ秒精度でリアルタイムと同期
-
-### 依存関係
-
-- SDL2（Cargo.tomlでプラットフォーム固有の設定）
-- macOS: raw-window-handle機能を使用
-- その他のプラットフォーム: バンドルされた静的リンクを使用
-
-### プロジェクト構造
-
-```
-src/
-├── main.rs           # エントリーポイント
-├── gameboy.rs        # メインエミュレータ統括
-├── cpu.rs            # CPU実装
-├── cpu/              # CPUサブモジュール
-├── mmu.rs            # メモリ管理
-├── ppu.rs            # グラフィックス処理
-├── renderer.rs       # レンダリング抽象化
-└── [メモリモジュール]  # bootrom.rs, wram.rs, hram.rs
-```
-
-### テスト
-
-`cargo test`でテストを実行します。プロジェクト構造は個々のコンポーネントのユニットテストをサポートしています。
+SDL2依存: macOSは `raw-window-handle` 機能、その他は静的リンク（`bundled`）を使用（`Cargo.toml` 参照）。
