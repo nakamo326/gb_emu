@@ -4,6 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **重要: このプロジェクトでは日本語で回答してください。**
 
+## Git コミット方針
+
+コミットは意味のある最小単位で行う。1つのコミットに複数の独立した変更を混在させない。
+
 ## ビルドと実行
 
 ```bash
