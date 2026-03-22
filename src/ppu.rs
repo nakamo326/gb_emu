@@ -24,6 +24,13 @@ const LYC_EQ_LY: u8 = 1 << 2;
 pub const LCD_WIDTH: usize = 160;
 pub const LCD_HEIGHT: usize = 144;
 
+struct SpriteData {
+    x: u8,
+    y: u8,
+    tile_num: u8,
+    flags: u8,
+}
+
 pub struct Ppu {
     mode: Mode,
     lcdc: u8,
@@ -40,6 +47,12 @@ pub struct Ppu {
     vram: Box<[u8; 0x2000]>,
     oam: Box<[u8; 0xA0]>,
     buffer: [u8; LCD_WIDTH * LCD_HEIGHT],
+    /// BGP 適用前のピクセル値（スプライト優先度判定用）
+    bg_pixel_buffer: [u8; LCD_WIDTH * LCD_HEIGHT],
+    /// OAMScan で収集したスプライト（最大10）
+    sprite_buffer: Vec<SpriteData>,
+    /// ウィンドウ内部 Y カウンタ（VBlank でリセット）
+    window_line_counter: u8,
     cycle: u8,
     /// VBlank 割り込み要求フラグ
     pub vblank_irq: bool,
@@ -66,6 +79,9 @@ impl Ppu {
             vram: Box::new([0; 0x2000]),
             oam: Box::new([0; 0xA0]),
             buffer: [0; LCD_WIDTH * LCD_HEIGHT],
+            bg_pixel_buffer: [0; LCD_WIDTH * LCD_HEIGHT],
+            sprite_buffer: Vec::with_capacity(10),
+            window_line_counter: 0,
             vblank_irq: false,
             stat_irq: false,
         }
@@ -175,15 +191,113 @@ impl Ppu {
             let tile_idx =
                 self.get_tile_idx_from_tile_map(tile_map, tile_row as u8, tile_col as u8);
 
-            //
             let pixel_row = y & 7;
             let pixel_col = x & 7;
 
             let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col);
+            let buf_idx = LCD_WIDTH * self.ly as usize + i;
+            self.bg_pixel_buffer[buf_idx] = pixel;
 
             let palette_idx = (self.bgp >> (pixel << 1)) & 0b11;
-            self.buffer[LCD_WIDTH * self.ly as usize + i] = palette_idx;
+            self.buffer[buf_idx] = palette_idx;
         }
+    }
+
+    fn collect_sprites(&mut self) {
+        self.sprite_buffer.clear();
+        let sprite_height: u8 = if self.lcdc & SPRITE_SIZE != 0 { 16 } else { 8 };
+        for i in 0..40usize {
+            if self.sprite_buffer.len() >= 10 {
+                break;
+            }
+            let base = i * 4;
+            let y = self.oam[base];
+            let x = self.oam[base + 1];
+            let tile_num = self.oam[base + 2];
+            let flags = self.oam[base + 3];
+            // スプライトの画面 Y 座標 (OAM の y は +16 オフセット)
+            let screen_y = y.wrapping_sub(16);
+            if self.ly >= screen_y && self.ly < screen_y.wrapping_add(sprite_height) {
+                self.sprite_buffer.push(SpriteData { x, y, tile_num, flags });
+            }
+        }
+        // X 座標で安定ソート（小さい X が優先）
+        self.sprite_buffer.sort_by_key(|s| s.x);
+    }
+
+    fn render_sprites(&mut self) {
+        if self.lcdc & SPRITE_ENABLE == 0 {
+            return;
+        }
+        let sprite_height: u8 = if self.lcdc & SPRITE_SIZE != 0 { 16 } else { 8 };
+        // 逆順で描画（X が小さいスプライトが最終的に上書きして前面に来る）
+        for i in (0..self.sprite_buffer.len()).rev() {
+            let s = &self.sprite_buffer[i];
+            let screen_x = s.x.wrapping_sub(8);
+            let screen_y = s.y.wrapping_sub(16);
+            let palette = if s.flags & 0x10 != 0 { self.obp1 } else { self.obp0 };
+            let y_flip = s.flags & 0x40 != 0;
+            let x_flip = s.flags & 0x20 != 0;
+            let bg_priority = s.flags & 0x80 != 0;
+
+            let row = self.ly.wrapping_sub(screen_y);
+            let tile_row = if y_flip { sprite_height - 1 - row } else { row };
+
+            // 8x16 モード: 上半分は tile_num の bit0 をクリア、下半分はセット
+            let tile_num = if sprite_height == 16 {
+                if tile_row < 8 { s.tile_num & 0xFE } else { s.tile_num | 0x01 }
+            } else {
+                s.tile_num
+            };
+            let effective_row = tile_row & 7;
+
+            for col in 0u8..8 {
+                let px = screen_x.wrapping_add(col);
+                if px >= LCD_WIDTH as u8 {
+                    continue;
+                }
+                let tile_col = if x_flip { 7 - col } else { col };
+                let pixel = self.get_pixel_from_tile(tile_num as usize, effective_row, tile_col);
+                if pixel == 0 {
+                    continue; // カラー 0 = 透明
+                }
+                let buf_idx = LCD_WIDTH * self.ly as usize + px as usize;
+                // bg_priority=1 の場合、BG カラーが 0 でなければスプライトを隠す
+                if bg_priority && self.bg_pixel_buffer[buf_idx] != 0 {
+                    continue;
+                }
+                let palette_idx = (palette >> (pixel << 1)) & 0b11;
+                self.buffer[buf_idx] = palette_idx;
+            }
+        }
+    }
+
+    fn render_window(&mut self) {
+        if self.lcdc & WINDOW_ENABLE == 0 || self.lcdc & BG_WINDOW_ENABLE == 0 {
+            return;
+        }
+        if self.ly < self.wy {
+            return;
+        }
+        let win_x_start = self.wx.saturating_sub(7) as usize;
+        if win_x_start >= LCD_WIDTH {
+            return;
+        }
+        let tile_map = self.lcdc & WINDOW_TILE_MAP != 0;
+        for i in win_x_start..LCD_WIDTH {
+            let x = (i - win_x_start) as u8;
+            let tile_row = self.window_line_counter / 8;
+            let tile_col = x / 8;
+            let tile_idx = self.get_tile_idx_from_tile_map(tile_map, tile_row, tile_col);
+            let pixel_row = self.window_line_counter & 7;
+            let pixel_col = x & 7;
+            let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col);
+            let buf_idx = LCD_WIDTH * self.ly as usize + i;
+            self.bg_pixel_buffer[buf_idx] = pixel;
+            let palette_idx = (self.bgp >> (pixel << 1)) & 0b11;
+            self.buffer[buf_idx] = palette_idx;
+        }
+        self.window_line_counter += 1;
     }
 
     fn check_lyc_eq_ly(&mut self) {
@@ -219,6 +333,7 @@ impl Ppu {
                 } else {
                     self.mode = Mode::VBlank;
                     self.cycle = 114;
+                    self.window_line_counter = 0;
                     self.vblank_irq = true;
                     if self.stat & VBLANK_INT != 0 {
                         self.stat_irq = true;
@@ -248,11 +363,14 @@ impl Ppu {
                 }
             }
             Mode::OAMScan => {
+                self.collect_sprites();
                 self.mode = Mode::Drawing;
                 self.cycle = 43;
             }
             Mode::Drawing => {
                 self.render_bg();
+                self.render_window();
+                self.render_sprites();
                 self.mode = Mode::HBlank;
                 self.cycle = 51;
                 if self.stat & HBLANK_INT != 0 {

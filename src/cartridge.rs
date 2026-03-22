@@ -169,6 +169,138 @@ impl MemoryBankController for Mbc1 {
     }
 }
 
+pub struct Mbc3 {
+    rom: Vec<u8>,
+    ram: Vec<u8>,
+    rom_bank: u8,
+    ram_bank: u8,
+    ram_enabled: bool,
+    rom_size: usize,
+    ram_size: usize,
+}
+
+impl Mbc3 {
+    pub fn new(rom: Vec<u8>, ram_size: usize) -> Self {
+        let rom_size = rom.len();
+        Self {
+            rom,
+            ram: vec![0; ram_size],
+            rom_bank: 1,
+            ram_bank: 0,
+            ram_enabled: false,
+            rom_size,
+            ram_size,
+        }
+    }
+}
+
+impl MemoryBankController for Mbc3 {
+    fn read(&self, addr: u16) -> u8 {
+        match addr {
+            0x0000..=0x3FFF => {
+                if (addr as usize) < self.rom_size { self.rom[addr as usize] } else { 0xFF }
+            }
+            0x4000..=0x7FFF => {
+                let bank = if self.rom_bank == 0 { 1 } else { self.rom_bank };
+                let offset = (bank as usize * 0x4000) + (addr as usize - 0x4000);
+                if offset < self.rom_size { self.rom[offset] } else { 0xFF }
+            }
+            0xA000..=0xBFFF => {
+                if !self.ram_enabled { return 0xFF; }
+                match self.ram_bank {
+                    0x00..=0x03 => {
+                        let offset = (self.ram_bank as usize * 0x2000) + (addr as usize - 0xA000);
+                        if offset < self.ram_size { self.ram[offset] } else { 0xFF }
+                    }
+                    0x08..=0x0C => 0x00, // RTC レジスタ（スタブ）
+                    _ => 0xFF,
+                }
+            }
+            _ => 0xFF,
+        }
+    }
+
+    fn write(&mut self, addr: u16, value: u8) {
+        match addr {
+            0x0000..=0x1FFF => self.ram_enabled = (value & 0x0F) == 0x0A,
+            0x2000..=0x3FFF => {
+                let bank = value & 0x7F;
+                self.rom_bank = if bank == 0 { 1 } else { bank };
+            }
+            0x4000..=0x5FFF => self.ram_bank = value & 0x0F,
+            0x6000..=0x7FFF => {} // RTC ラッチ（未実装）
+            0xA000..=0xBFFF => {
+                if !self.ram_enabled { return; }
+                if self.ram_bank <= 0x03 {
+                    let offset = (self.ram_bank as usize * 0x2000) + (addr as usize - 0xA000);
+                    if offset < self.ram_size { self.ram[offset] = value; }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+pub struct Mbc5 {
+    rom: Vec<u8>,
+    ram: Vec<u8>,
+    rom_bank: u16,
+    ram_bank: u8,
+    ram_enabled: bool,
+    rom_size: usize,
+    ram_size: usize,
+}
+
+impl Mbc5 {
+    pub fn new(rom: Vec<u8>, ram_size: usize) -> Self {
+        let rom_size = rom.len();
+        Self {
+            rom,
+            ram: vec![0; ram_size],
+            rom_bank: 1,
+            ram_bank: 0,
+            ram_enabled: false,
+            rom_size,
+            ram_size,
+        }
+    }
+}
+
+impl MemoryBankController for Mbc5 {
+    fn read(&self, addr: u16) -> u8 {
+        match addr {
+            0x0000..=0x3FFF => {
+                if (addr as usize) < self.rom_size { self.rom[addr as usize] } else { 0xFF }
+            }
+            0x4000..=0x7FFF => {
+                let offset = (self.rom_bank as usize * 0x4000) + (addr as usize - 0x4000);
+                if offset < self.rom_size { self.rom[offset] } else { 0xFF }
+            }
+            0xA000..=0xBFFF => {
+                if !self.ram_enabled || self.ram_size == 0 { return 0xFF; }
+                let offset = (self.ram_bank as usize * 0x2000) + (addr as usize - 0xA000);
+                if offset < self.ram_size { self.ram[offset] } else { 0xFF }
+            }
+            _ => 0xFF,
+        }
+    }
+
+    fn write(&mut self, addr: u16, value: u8) {
+        match addr {
+            0x0000..=0x1FFF => self.ram_enabled = (value & 0x0F) == 0x0A,
+            0x2000..=0x2FFF => self.rom_bank = (self.rom_bank & 0x100) | (value as u16),
+            0x3000..=0x3FFF => self.rom_bank = (self.rom_bank & 0x0FF) | (((value & 0x01) as u16) << 8),
+            0x4000..=0x5FFF => self.ram_bank = value & 0x0F,
+            0xA000..=0xBFFF => {
+                if !self.ram_enabled || self.ram_size == 0 { return; }
+                let offset = (self.ram_bank as usize * 0x2000) + (addr as usize - 0xA000);
+                if offset < self.ram_size { self.ram[offset] = value; }
+            }
+            _ => {}
+        }
+    }
+}
+
 pub struct Cartridge {
     mbc: Box<dyn MemoryBankController>,
     header: CartridgeHeader,
@@ -214,9 +346,13 @@ impl Cartridge {
             CartridgeType::Mbc1 | CartridgeType::Mbc1Ram | CartridgeType::Mbc1RamBattery => {
                 Box::new(Mbc1::new(rom, ram_size))
             }
-            _ => {
-                // For now, fallback to ROM only for unsupported MBCs
-                Box::new(RomOnly::new(rom))
+            CartridgeType::Mbc3
+            | CartridgeType::Mbc3Ram
+            | CartridgeType::Mbc3RamBattery
+            | CartridgeType::Mbc3Timer
+            | CartridgeType::Mbc3TimerRam => Box::new(Mbc3::new(rom, ram_size)),
+            CartridgeType::Mbc5 | CartridgeType::Mbc5Ram | CartridgeType::Mbc5RamBattery => {
+                Box::new(Mbc5::new(rom, ram_size))
             }
         };
 
