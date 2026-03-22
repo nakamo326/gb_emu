@@ -85,6 +85,22 @@ impl Cpu {
                 self.regs.set_cf((sp & 0x00FF) + (e & 0x00FF) > 0x00FF);
                 self.regs.write_hl(sp.wrapping_add(e));
                 go!(1);
+                return;
+            },
+            1: {
+                go!(0);
+                self.fetch(bus);
+            },
+        });
+    }
+
+    /// LD SP, HL (0xF9) — 2 M-cycles
+    pub fn ld_sp_hl(&mut self, bus: &mut Mmu) {
+        step!((), {
+            0: {
+                self.regs.sp = self.regs.hl();
+                go!(1);
+                return;
             },
             1: {
                 go!(0);
@@ -247,11 +263,9 @@ impl Cpu {
             0: if let Some(v) = self.read16(bus, src) {
                 VAL16.store(v.wrapping_add(1), Relaxed);
                 go!(1);
+                return;
             },
             1: if self.write16(bus, src, VAL16.load(Relaxed)).is_some() {
-                go!(2);
-            },
-            2: {
                 go!(0);
                 self.fetch(bus);
             },
@@ -286,11 +300,9 @@ impl Cpu {
             0: if let Some(v) = self.read16(bus, src) {
                 VAL16.store(v.wrapping_sub(1), Relaxed);
                 go!(1);
+                return;
             },
             1: if self.write16(bus, src, VAL16.load(Relaxed)).is_some() {
-                go!(2);
-            },
-            2: {
                 go!(0);
                 self.fetch(bus);
             },
@@ -337,6 +349,7 @@ impl Cpu {
                 self.regs.set_cf((sp & 0x00FF) + (e & 0x00FF) > 0x00FF);
                 self.regs.sp = sp.wrapping_add(e);
                 go!(1);
+                return;
             },
             1: {
                 go!(2);
@@ -757,6 +770,7 @@ impl Cpu {
             0: if let Some(offset) = self.read8(bus, Imm8) {
                 self.regs.pc = self.regs.pc.wrapping_add(offset as i8 as u16);
                 go!(1);
+                return;
             },
             1: {
                 go!(0);
@@ -796,6 +810,7 @@ impl Cpu {
             0: if let Some(v) = self.read16(bus, Imm16) {
                 self.regs.pc = v;
                 go!(1);
+                return;
             },
             1: {
                 go!(0);
@@ -851,10 +866,10 @@ impl Cpu {
                 if self.cond(c) {
                     VAL16.store(v, Relaxed);
                     go!(1);
-                    return;
+                } else {
+                    go!(0);
+                    self.fetch(bus);
                 }
-                go!(0);
-                self.fetch(bus);
             },
             1: if self.push16(bus, self.regs.pc).is_some() {
                 self.regs.pc = VAL16.load(Relaxed);
@@ -869,6 +884,7 @@ impl Cpu {
             0: if let Some(v) = self.pop16(bus) {
                 self.regs.pc = v;
                 go!(1);
+                return;
             },
             1: {
                 go!(0);
@@ -881,17 +897,23 @@ impl Cpu {
     pub fn ret_c(&mut self, bus: &mut Mmu, c: Cond) {
         step!((), {
             0: {
-                go!(1);
-                if !self.cond(c) {
-                    go!(0);
-                    self.fetch(bus);
+                if self.cond(c) {
+                    go!(1);
+                } else {
+                    go!(3);
                 }
+                return;
             },
             1: if let Some(v) = self.pop16(bus) {
                 self.regs.pc = v;
                 go!(2);
+                return;
             },
             2: {
+                go!(0);
+                self.fetch(bus);
+            },
+            3: {
                 go!(0);
                 self.fetch(bus);
             },
@@ -904,6 +926,7 @@ impl Cpu {
             0: if let Some(v) = self.pop16(bus) {
                 self.regs.pc = v;
                 go!(1);
+                return;
             },
             1: {
                 self.ime = true;
@@ -915,17 +938,10 @@ impl Cpu {
 
     /// RST n
     pub fn rst(&mut self, bus: &mut Mmu, addr: u8) {
-        step!((), {
-            0: {
-                go!(1);
-                return;
-            },
-            1: if self.push16(bus, self.regs.pc).is_some() {
-                self.regs.pc = addr as u16;
-                go!(0);
-                self.fetch(bus);
-            },
-        });
+        if self.push16(bus, self.regs.pc).is_some() {
+            self.regs.pc = addr as u16;
+            self.fetch(bus);
+        }
     }
 
     // ──────────────────────────────────────────────

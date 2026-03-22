@@ -252,7 +252,7 @@ impl Cpu {
             0xF6 => self.or(bus, Imm8),
             0xF7 => self.rst(bus, 0x30),
             0xF8 => self.ldhl(bus),
-            0xF9 => self.ld16(bus, Reg16::SP, Reg16::HL),
+            0xF9 => self.ld_sp_hl(bus),
             0xFA => self.ld(bus, Reg8::A, Direct8::D),
             0xFB => self.ei(bus),
             0xFE => self.cp(bus, Imm8),
