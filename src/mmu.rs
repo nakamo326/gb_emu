@@ -18,6 +18,10 @@ pub struct Mmu {
     pub ie: u8,
     /// シリアルデータ (0xFF01)
     serial_data: u8,
+    /// シリアル出力バッファ（テスト終了検知用）
+    serial_buf: String,
+    /// テスト終了フラグ
+    pub test_done: bool,
 }
 
 impl Mmu {
@@ -38,7 +42,26 @@ impl Mmu {
             if_: 0,
             ie: 0,
             serial_data: 0,
+            serial_buf: String::new(),
+            test_done: false,
         }
+    }
+
+    /// BootROM をスキップして DMG 起動直後のハードウェアレジスタ値をセットする
+    pub fn apply_dmg_init(&mut self) {
+        // PPU
+        self.write(0xFF40, 0x91); // LCDC
+        self.write(0xFF41, 0x85); // STAT
+        self.write(0xFF47, 0xFC); // BGP
+        self.write(0xFF48, 0xFF); // OBP0
+        self.write(0xFF49, 0xFF); // OBP1
+        // タイマー
+        self.write(0xFF05, 0x00); // TIMA
+        self.write(0xFF06, 0x00); // TMA
+        self.write(0xFF07, 0x00); // TAC
+        // 割り込み
+        self.if_ = 0xE1;
+        self.ie = 0x00;
     }
 
     pub fn load_cartridge(&mut self, rom_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -95,9 +118,15 @@ impl Mmu {
             0xFF02 => {
                 // シリアル転送: bit7 がセットされたら文字を出力（blargg テスト用）
                 if val & 0x80 != 0 {
-                    print!("{}", self.serial_data as char);
+                    let c = self.serial_data as char;
+                    print!("{}", c);
                     use std::io::Write;
                     let _ = std::io::stdout().flush();
+                    self.serial_buf.push(c);
+                    // blargg テストは "Passed" または "Failed" で終了
+                    if self.serial_buf.contains("Passed") || self.serial_buf.contains("Failed") {
+                        self.test_done = true;
+                    }
                 }
             }
             0xFF04..=0xFF07 => self.timer.write(addr, val),

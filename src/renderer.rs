@@ -2,6 +2,12 @@ pub trait Renderer {
     fn draw(&mut self, pixel_buffer: &[u8]);
 }
 
+pub struct NullRenderer;
+
+impl Renderer for NullRenderer {
+    fn draw(&mut self, _: &[u8]) {}
+}
+
 pub struct TerminalRenderer {
     width: usize,
     height: usize,

@@ -16,8 +16,13 @@ impl Bootrom {
     }
 
     pub fn new(path: &str) -> Self {
-        let rom = Self::read_file_to_array(path).unwrap();
-        Self { rom, active: true }
+        match Self::read_file_to_array(path) {
+            Ok(rom) => Self { rom, active: true },
+            Err(_) => {
+                println!("BootROM not found ({path}), starting without it");
+                Self { rom: [0; 0x100], active: false }
+            }
+        }
     }
 
     pub fn is_active(&self) -> bool {

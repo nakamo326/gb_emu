@@ -933,7 +933,13 @@ impl Cpu {
     // ──────────────────────────────────────────────
 
     pub fn halt(&mut self, bus: &mut Mmu) {
-        self.halted = true;
+        let pending = bus.ie & bus.if_ & 0x1F;
+        if !self.ime && pending != 0 {
+            // HALT バグ: HALT に入らず、次の fetch() で PC をインクリメントしない
+            self.halt_bug = true;
+        } else {
+            self.halted = true;
+        }
         self.fetch(bus);
     }
 

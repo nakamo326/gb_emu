@@ -11,9 +11,15 @@ mod timer;
 mod wram;
 
 pub fn main() {
-    let lcd = Box::new(lcd::Lcd::new());
-    // let mut renderer = Box::new(renderer::TerminalRenderer::new(160, 144));
-    let mut gameboy = gameboy::GameBoy::new(lcd);
+    let headless = std::env::args().any(|a| a == "--headless");
+
+    let lcd: Box<dyn renderer::Renderer> = if headless {
+        Box::new(renderer::NullRenderer)
+    } else {
+        Box::new(lcd::Lcd::new())
+    };
+
+    let mut gameboy = gameboy::GameBoy::new(lcd, headless);
 
     // blargg テスト ROM を優先ロード
     if gameboy.load_cartridge("blargg/cpu_instrs.gb").is_ok() {

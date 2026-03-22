@@ -12,15 +12,18 @@ pub struct GameBoy {
     cpu: Cpu,
     mmu: Mmu,
     lcd: Box<dyn Renderer>,
+    headless: bool,
 }
 
 impl GameBoy {
-    pub fn new(lcd: Box<dyn Renderer>) -> Self {
-        Self {
-            cpu: Cpu::new(),
-            mmu: Mmu::new(),
-            lcd,
+    pub fn new(lcd: Box<dyn Renderer>, headless: bool) -> Self {
+        let mut cpu = Cpu::new();
+        let mut mmu = Mmu::new();
+        if !mmu.bootrom.is_active() {
+            cpu.apply_dmg_init();
+            mmu.apply_dmg_init();
         }
+        Self { cpu, mmu, lcd, headless }
     }
 
     pub fn load_cartridge(&mut self, rom_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -55,7 +58,13 @@ impl GameBoy {
 
                 elapsed += M_CYCLE_NANOS;
             }
-            std::thread::sleep(time::Duration::from_nanos(M_CYCLE_NANOS as u64));
+            if self.headless {
+                if self.mmu.test_done {
+                    break;
+                }
+            } else {
+                std::thread::sleep(time::Duration::from_nanos(M_CYCLE_NANOS as u64));
+            }
         }
     }
 }
