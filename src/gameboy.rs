@@ -34,9 +34,25 @@ impl GameBoy {
             let e = time.elapsed().as_nanos();
             for _ in 0..(e - elapsed) / M_CYCLE_NANOS {
                 self.cpu.emulate_cycle(&mut self.mmu);
+
+                // タイマー割り込み
+                if self.mmu.timer.emulate_cycle() {
+                    self.mmu.if_ |= 0x04;
+                }
+
+                // PPU 割り込み
                 if self.mmu.ppu.emulate_cycle() {
                     self.lcd.draw(self.mmu.ppu.pixel_buffer());
                 }
+                if self.mmu.ppu.vblank_irq {
+                    self.mmu.ppu.vblank_irq = false;
+                    self.mmu.if_ |= 0x01;
+                }
+                if self.mmu.ppu.stat_irq {
+                    self.mmu.ppu.stat_irq = false;
+                    self.mmu.if_ |= 0x02;
+                }
+
                 elapsed += M_CYCLE_NANOS;
             }
             std::thread::sleep(time::Duration::from_nanos(M_CYCLE_NANOS as u64));

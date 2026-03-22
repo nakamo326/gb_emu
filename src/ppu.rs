@@ -41,6 +41,10 @@ pub struct Ppu {
     oam: Box<[u8; 0xA0]>,
     buffer: [u8; LCD_WIDTH * LCD_HEIGHT],
     cycle: u8,
+    /// VBlank 割り込み要求フラグ
+    pub vblank_irq: bool,
+    /// STAT 割り込み要求フラグ
+    pub stat_irq: bool,
 }
 
 impl Ppu {
@@ -62,6 +66,8 @@ impl Ppu {
             vram: Box::new([0; 0x2000]),
             oam: Box::new([0; 0xA0]),
             buffer: [0; LCD_WIDTH * LCD_HEIGHT],
+            vblank_irq: false,
+            stat_irq: false,
         }
     }
 
@@ -207,11 +213,21 @@ impl Ppu {
                 if self.ly < 144 {
                     self.mode = Mode::OAMScan;
                     self.cycle = 20;
+                    if self.stat & OAM_SCAN_INT != 0 {
+                        self.stat_irq = true;
+                    }
                 } else {
                     self.mode = Mode::VBlank;
                     self.cycle = 114;
+                    self.vblank_irq = true;
+                    if self.stat & VBLANK_INT != 0 {
+                        self.stat_irq = true;
+                    }
                 }
                 self.check_lyc_eq_ly();
+                if self.ly == self.lyc && self.stat & LYC_EQ_LY_INT != 0 {
+                    self.stat_irq = true;
+                }
             }
             Mode::VBlank => {
                 self.ly += 1;
@@ -220,10 +236,16 @@ impl Ppu {
                     self.mode = Mode::OAMScan;
                     self.cycle = 20;
                     is_vsync = true;
+                    if self.stat & OAM_SCAN_INT != 0 {
+                        self.stat_irq = true;
+                    }
                 } else {
                     self.cycle = 114;
                 }
                 self.check_lyc_eq_ly();
+                if self.ly == self.lyc && self.stat & LYC_EQ_LY_INT != 0 {
+                    self.stat_irq = true;
+                }
             }
             Mode::OAMScan => {
                 self.mode = Mode::Drawing;
@@ -233,6 +255,9 @@ impl Ppu {
                 self.render_bg();
                 self.mode = Mode::HBlank;
                 self.cycle = 51;
+                if self.stat & HBLANK_INT != 0 {
+                    self.stat_irq = true;
+                }
             }
         }
 
