@@ -4,6 +4,7 @@ use crate::input::ButtonState;
 pub trait Backend {
     fn draw(&mut self, buffer: &[u8]);
     fn poll(&mut self) -> ButtonState;
+    fn push_audio(&mut self, samples: &[f32]);
 }
 
 /// テスト・ヘッドレス用 no-op 実装
@@ -14,4 +15,5 @@ impl Backend for NullBackend {
     fn poll(&mut self) -> ButtonState {
         ButtonState::default()
     }
+    fn push_audio(&mut self, _: &[f32]) {}
 }

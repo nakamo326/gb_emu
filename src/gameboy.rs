@@ -47,6 +47,12 @@ impl GameBoy {
                     self.mmu.if_ |= 0x04;
                 }
 
+                // APU サンプル生成
+                let samples = self.mmu.apu.emulate_cycle();
+                if !samples.is_empty() {
+                    self.backend.push_audio(&samples);
+                }
+
                 // PPU 割り込み
                 if self.mmu.ppu.emulate_cycle() {
                     self.backend.draw(self.mmu.ppu.pixel_buffer());

@@ -1,3 +1,4 @@
+mod apu;
 mod backend;
 mod bootrom;
 mod cartridge;

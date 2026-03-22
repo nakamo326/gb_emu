@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## ビルドと実行
 
 ```bash
+# CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo build
 cargo build
 cargo run
 cargo build --release

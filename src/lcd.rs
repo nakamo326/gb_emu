@@ -1,3 +1,4 @@
+use sdl2::audio::{AudioQueue, AudioSpecDesired};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
@@ -11,12 +12,15 @@ use crate::input::ButtonState;
 use crate::ppu::{LCD_HEIGHT, LCD_WIDTH};
 
 const SCALE: u32 = 4;
+// AudioQueue のバッファ上限: 約 100ms 分（44100 * 2ch * 4bytes * 0.1sec）
+const AUDIO_QUEUE_MAX_BYTES: u32 = 35280;
 
 pub struct Lcd {
     canvas: Canvas<Window>,
     #[allow(dead_code)]
     sdl_context: Sdl,
     event_pump: EventPump,
+    audio_queue: Option<AudioQueue<f32>>,
 }
 
 impl Lcd {
@@ -47,7 +51,22 @@ impl Lcd {
         canvas.clear();
         canvas.present();
 
-        Self { canvas, sdl_context, event_pump }
+        let audio_queue = sdl_context.audio().ok().and_then(|audio| {
+            let desired_spec = AudioSpecDesired {
+                freq: Some(44100),
+                channels: Some(2),
+                samples: None,
+            };
+            audio.open_queue::<f32, _>(None, &desired_spec).ok().map(|q| {
+                q.resume();
+                q
+            })
+        });
+        if audio_queue.is_none() {
+            eprintln!("Warning: audio device unavailable, running without sound");
+        }
+
+        Self { canvas, sdl_context, event_pump, audio_queue }
     }
 }
 
@@ -100,5 +119,13 @@ impl Backend for Lcd {
         state.left = keys.contains(&Keycode::Left);
         state.right = keys.contains(&Keycode::Right);
         state
+    }
+
+    fn push_audio(&mut self, samples: &[f32]) {
+        if let Some(q) = &self.audio_queue {
+            if q.size() < AUDIO_QUEUE_MAX_BYTES {
+                let _ = q.queue_audio(samples);
+            }
+        }
     }
 }

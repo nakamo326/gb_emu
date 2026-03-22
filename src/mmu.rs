@@ -1,3 +1,4 @@
+use crate::apu::Apu;
 use crate::bootrom::Bootrom;
 use crate::cartridge::Cartridge;
 use crate::hram::HRam;
@@ -15,6 +16,7 @@ pub struct Mmu {
     pub ppu: Ppu,
     pub timer: Timer,
     pub joypad: Joypad,
+    pub apu: Apu,
     /// 割り込みフラグ (0xFF0F)
     pub if_: u8,
     /// 割り込み許可 (0xFFFF)
@@ -39,6 +41,7 @@ impl Mmu {
         let ppu = Ppu::new();
         let timer = Timer::new();
         let joypad = Joypad::new();
+        let apu = Apu::new();
 
         Self {
             bootrom,
@@ -48,6 +51,7 @@ impl Mmu {
             ppu,
             timer,
             joypad,
+            apu,
             if_: 0,
             ie: 0,
             serial_data: 0,
@@ -71,6 +75,24 @@ impl Mmu {
         self.write(0xFF05, 0x00); // TIMA
         self.write(0xFF06, 0x00); // TMA
         self.write(0xFF07, 0x00); // TAC
+        // APU
+        self.write(0xFF26, 0xF1); // NR52: 電源ON、CH1有効
+        self.write(0xFF25, 0xF3); // NR51: パンニング
+        self.write(0xFF24, 0x77); // NR50: マスターボリューム
+        self.write(0xFF10, 0x80); // NR10: Sweep
+        self.write(0xFF11, 0xBF); // NR11: Duty/Length
+        self.write(0xFF12, 0xF3); // NR12: Envelope
+        self.write(0xFF14, 0xBF); // NR14: Freq high + trigger
+        self.write(0xFF16, 0x3F); // NR21
+        self.write(0xFF17, 0x00); // NR22
+        self.write(0xFF19, 0xBF); // NR24
+        self.write(0xFF1A, 0x7F); // NR30: CH3 DAC
+        self.write(0xFF1B, 0xFF); // NR31: Length
+        self.write(0xFF1C, 0x9F); // NR32: Level
+        self.write(0xFF1E, 0xBF); // NR34
+        self.write(0xFF21, 0x00); // NR42: Envelope
+        self.write(0xFF22, 0x00); // NR43: Frequency
+        self.write(0xFF23, 0xBF); // NR44
         // 割り込み
         self.if_ = 0xE1;
         self.ie = 0x00;
@@ -114,6 +136,7 @@ impl Mmu {
             0xFF02 => 0x7E, // シリアル制御（転送完了）
             0xFF04..=0xFF07 => self.timer.read(addr),
             0xFF0F => self.if_ | 0xE0, // 上位3bitは常に1
+            0xFF10..=0xFF3F => self.apu.read(addr),
             0xFF40..=0xFF4B => self.ppu.read(addr),
             0xC000..=0xFDFF => self.wram.read(addr),
             0xFF50 => 0xFF,
@@ -171,6 +194,7 @@ impl Mmu {
             }
             0xFF04..=0xFF07 => self.timer.write(addr, val),
             0xFF0F => self.if_ = val & 0x1F,
+            0xFF10..=0xFF3F => self.apu.write(addr, val),
             0xFF46 => {
                 // OAM DMA転送: src_base * 0x100 から 0xFE00 へ 160バイトコピー
                 let src = (val as u16) << 8;
