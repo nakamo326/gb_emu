@@ -25,6 +25,10 @@ pub struct Mmu {
     serial_buf: String,
     /// テスト終了フラグ
     pub test_done: bool,
+    /// 外部RAM監視バッファ ($A000-$A003 + テキスト)
+    ram_monitor: [u8; 4],
+    ram_text_buf: Vec<u8>,
+    ram_sig_ok: bool,
 }
 
 impl Mmu {
@@ -49,6 +53,9 @@ impl Mmu {
             serial_data: 0,
             serial_buf: String::new(),
             test_done: false,
+            ram_monitor: [0x80, 0, 0, 0],
+            ram_text_buf: Vec::new(),
+            ram_sig_ok: false,
         }
     }
 
@@ -121,6 +128,27 @@ impl Mmu {
             0x0000..=0x7FFF | 0xA000..=0xBFFF => {
                 if let Some(cartridge) = &mut self.cartridge {
                     cartridge.write(addr, val);
+                }
+                // blargg v2テスト: 外部RAMへの結果書き込みを監視
+                if addr >= 0xA000 && addr <= 0xA003 {
+                    self.ram_monitor[(addr - 0xA000) as usize] = val;
+                    // シグネチャ確認: $A001=$DE, $A002=$B0, $A003=$61
+                    if self.ram_monitor[1] == 0xDE && self.ram_monitor[2] == 0xB0 && self.ram_monitor[3] == 0x61 {
+                        self.ram_sig_ok = true;
+                    }
+                    // $A000 != 0x80 かつシグネチャあり = テスト完了
+                    if self.ram_sig_ok && addr == 0xA000 && val != 0x80 {
+                        use std::io::Write;
+                        let text = String::from_utf8_lossy(&self.ram_text_buf).into_owned();
+                        print!("{}", text);
+                        let _ = std::io::stdout().flush();
+                        self.test_done = true;
+                    }
+                } else if addr >= 0xA004 && addr < 0xB000 {
+                    // テキスト出力バッファに追記
+                    if val != 0 {
+                        self.ram_text_buf.push(val);
+                    }
                 }
             }
             0x8000..=0x9FFF => self.ppu.write(addr, val),

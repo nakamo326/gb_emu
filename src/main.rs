@@ -14,7 +14,11 @@ mod timer;
 mod wram;
 
 pub fn main() {
-    let headless = std::env::args().any(|a| a == "--headless");
+    let args: Vec<String> = std::env::args().collect();
+    let headless = args.iter().any(|a| a == "--headless");
+
+    // --headless 以外の引数をROMパスとして扱う
+    let rom_path = args.iter().skip(1).find(|a| *a != "--headless").map(|s| s.as_str());
 
     let backend: Box<dyn backend::Backend> = if headless {
         Box::new(backend::NullBackend)
@@ -24,9 +28,14 @@ pub fn main() {
 
     let mut gameboy = gameboy::GameBoy::new(backend, headless);
 
-    // blargg テスト ROM を優先ロード
-    if gameboy.load_cartridge("blargg/instr_timing.gb").is_ok() {
-        println!("Loaded: blargg/instr_timing.gb");
+    if let Some(path) = rom_path {
+        match gameboy.load_cartridge(path) {
+            Ok(_) => println!("Loaded: {}", path),
+            Err(e) => {
+                eprintln!("Failed to load '{}': {}", path, e);
+                std::process::exit(1);
+            }
+        }
     } else if gameboy.load_cartridge("test_rom.gb").is_ok() {
         println!("Loaded: test_rom.gb");
     } else {
