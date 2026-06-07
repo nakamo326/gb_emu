@@ -318,19 +318,20 @@ mod tests {
     #[test]
     fn interrupt_dispatch() {
         // VBlank 割り込みでベクタ 0x0040 へ。SP に戻りアドレスを積む。
-        // 注: 現行実装は割り込みディスパッチを 1 emulate_cycle で完了する（実機は5 M-cycle）。
-        //     ベースラインは現行挙動を固定する。正確な5サイクル化は別タスク。
+        // 実機に合わせ5 M-cycle: 内部NOP×2 → PCH push → PCL push → PC←ベクタ
         let (mut c, mut m) = setup(&[0x00]);
         c.ime = true;
         m.ie = 0x01; // VBlank 許可
         m.if_ = 0x01; // VBlank 要求
-        // setup 直後が命令境界のため、最初の emulate_cycle で即割り込みディスパッチ。
-        // ベクタ先(bootrom)の命令を実行しないよう 1 サイクルのみ回す。
-        run(&mut c, &mut m, 1); // 割り込みディスパッチ（現行は1サイクル）
+        // setup 直後が命令境界のため、最初の emulate_cycle で即割り込みディスパッチ開始。
+        run(&mut c, &mut m, 5); // 割り込みディスパッチ（5 M-cycle）
         assert_eq!(c.regs.pc, 0x0041); // 0x0040 を fetch 済み
         assert!(!c.ime); // 割り込みで IME クリア
         assert_eq!(m.if_ & 0x01, 0); // 要求クリア
         assert_eq!(c.regs.sp, STACK - 2);
+        // 戻りアドレス = 割り込み直前に実行するはずだった命令 (PROG)
+        assert_eq!(m.read(STACK - 1), (PROG >> 8) as u8);
+        assert_eq!(m.read(STACK - 2), PROG as u8);
     }
 
     #[test]

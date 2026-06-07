@@ -1139,23 +1139,50 @@ pub(crate) fn exec_ei(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
     true
 }
 
-/// 割り込みディスパッチ(現行実装に合わせ1 M-cycleで完了)
+/// 割り込みディスパッチ（実機に合わせ5 M-cycle）
+/// M1: 内部NOP (IMEクリア・ベクタ確定・IFビットクリア)
+/// M2: 内部NOP
+/// M3: PCH プッシュ
+/// M4: PCL プッシュ
+/// M5: PC ← ベクタ
 pub(crate) fn exec_interrupt(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
-    let pending = bus.ie & bus.if_ & 0x1F;
-    for bit in 0..5u8 {
-        if pending & (1 << bit) != 0 {
+    match cpu.instr.step {
+        0 => {
+            let pending = bus.ie & bus.if_ & 0x1F;
             cpu.ime = false;
-            bus.if_ &= !(1 << bit);
-            let vector = 0x0040u16 + (bit as u16) * 0x08;
+            for bit in 0..5u8 {
+                if pending & (1 << bit) != 0 {
+                    bus.if_ &= !(1 << bit);
+                    cpu.wz = 0x0040u16 + (bit as u16) * 0x08;
+                    break;
+                }
+            }
+            cpu.instr.step = 1;
+            false
+        }
+        1 => {
+            cpu.instr.step = 2;
+            false
+        }
+        2 => {
             // fetch 済みのため戻るべき命令アドレスは PC - 1
             let ret = cpu.regs.pc.wrapping_sub(1);
             cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
             bus.write(cpu.regs.sp, (ret >> 8) as u8);
+            cpu.instr.step = 3;
+            false
+        }
+        3 => {
+            let ret = cpu.regs.pc.wrapping_sub(1);
             cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
             bus.write(cpu.regs.sp, ret as u8);
-            cpu.regs.pc = vector;
-            break;
+            cpu.instr.step = 4;
+            false
         }
+        4 => {
+            cpu.regs.pc = cpu.wz;
+            true
+        }
+        _ => unreachable!(),
     }
-    true
 }
