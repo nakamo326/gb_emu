@@ -4,7 +4,7 @@ mod instr;
 mod operand;
 mod registers;
 
-use crate::mmu::Mmu;
+use crate::mmu::MemoryBus;
 use instr::Instr;
 use registers::Registers;
 
@@ -58,7 +58,7 @@ impl Cpu {
     }
 
     /// 次のオペコードを先読みする（実機同様のオーバーラップ fetch）
-    pub fn fetch(&mut self, bus: &Mmu) {
+    pub fn fetch(&mut self, bus: &dyn MemoryBus) {
         self.opcode = bus.read(self.regs.pc);
         if self.halt_bug {
             // HALT バグ: PC をインクリメントしない（次命令の第1オペランドが opcode と同じアドレスになる）
@@ -69,7 +69,7 @@ impl Cpu {
     }
 
     /// 1 M-cycle 進める。完了なら次命令を decode、未完了なら現命令を継続する。
-    pub fn emulate_cycle(&mut self, bus: &mut Mmu) {
+    pub fn emulate_cycle(&mut self, bus: &mut dyn MemoryBus) {
         if self.done {
             // === 命令境界 ===
             // EI の遅延処理: 前の命令が EI だったら今ここで IME を有効化。
@@ -80,7 +80,7 @@ impl Cpu {
                 self.ime = true;
             }
 
-            let pending = bus.ie & bus.if_ & 0x1F;
+            let pending = bus.ie() & bus.if_() & 0x1F;
 
             // HALT から割り込みで復帰
             if self.halted {
@@ -115,13 +115,16 @@ mod tests {
     //! 現行(static)実装はグローバル状態を共有するため `cargo test -- --test-threads=1` で直列実行する。
     //! 再設計後も同じ期待値が通ることを完了条件とする（サイクル数・フラグ・結果・割り込みタイミング）。
     use super::*;
+    use crate::bootrom::Bootrom;
+    use crate::mmu::Mmu;
+    use crate::platform::NullCartridge;
 
     const PROG: u16 = 0xC000; // プログラム配置先(WRAM)
     const STACK: u16 = 0xD000; // スタック初期値
 
     /// プログラムを WRAM に配置し、最初の opcode を fetch 済みにした Cpu/Mmu を返す
-    fn setup(program: &[u8]) -> (Cpu, Mmu) {
-        let mut mmu = Mmu::new();
+    fn setup(program: &[u8]) -> (Cpu, Mmu<NullCartridge>) {
+        let mut mmu = Mmu::new(Bootrom::disabled(), NullCartridge);
         let mut cpu = Cpu::new();
         for (i, &b) in program.iter().enumerate() {
             mmu.write(PROG + i as u16, b);
@@ -133,7 +136,7 @@ mod tests {
     }
 
     /// 指定 M-cycle 数だけ実行
-    fn run(cpu: &mut Cpu, mmu: &mut Mmu, cycles: usize) {
+    fn run(cpu: &mut Cpu, mmu: &mut dyn MemoryBus, cycles: usize) {
         for _ in 0..cycles {
             cpu.emulate_cycle(mmu);
         }

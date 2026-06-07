@@ -1,3 +1,4 @@
+use gb_core::platform::CartridgeBus;
 use std::fs;
 
 #[derive(Debug, Clone, Copy)]
@@ -369,5 +370,14 @@ impl Cartridge {
 
     pub fn header(&self) -> &CartridgeHeader {
         &self.header
+    }
+}
+
+impl CartridgeBus for Cartridge {
+    fn read(&self, addr: u16) -> u8 {
+        self.mbc.read(addr)
+    }
+    fn write(&mut self, addr: u16, val: u8) {
+        self.mbc.write(addr, val);
     }
 }

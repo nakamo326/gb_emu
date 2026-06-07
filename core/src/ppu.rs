@@ -29,6 +29,8 @@ struct SpriteData {
     y: u8,
     tile_num: u8,
     flags: u8,
+    /// OAM インデックス。同一 X 座標時の優先度（小さい方が前面）を保つための安定ソート鍵。
+    order: u8,
 }
 
 pub struct Ppu {
@@ -44,13 +46,13 @@ pub struct Ppu {
     obp1: u8,
     wy: u8,
     wx: u8,
-    vram: Box<[u8; 0x2000]>,
-    oam: Box<[u8; 0xA0]>,
+    vram: [u8; 0x2000],
+    oam: [u8; 0xA0],
     buffer: [u8; LCD_WIDTH * LCD_HEIGHT],
     /// BGP 適用前のピクセル値（スプライト優先度判定用）
     bg_pixel_buffer: [u8; LCD_WIDTH * LCD_HEIGHT],
     /// OAMScan で収集したスプライト（最大10）
-    sprite_buffer: Vec<SpriteData>,
+    sprite_buffer: heapless::Vec<SpriteData, 10>,
     /// ウィンドウ内部 Y カウンタ（VBlank でリセット）
     window_line_counter: u8,
     cycle: u8,
@@ -76,11 +78,11 @@ impl Ppu {
             wy: 0,
             wx: 0,
             cycle: 20,
-            vram: Box::new([0; 0x2000]),
-            oam: Box::new([0; 0xA0]),
+            vram: [0; 0x2000],
+            oam: [0; 0xA0],
             buffer: [0; LCD_WIDTH * LCD_HEIGHT],
             bg_pixel_buffer: [0; LCD_WIDTH * LCD_HEIGHT],
-            sprite_buffer: Vec::with_capacity(10),
+            sprite_buffer: heapless::Vec::new(),
             window_line_counter: 0,
             vblank_irq: false,
             stat_irq: false,
@@ -221,11 +223,14 @@ impl Ppu {
             // スプライトの画面 Y 座標 (OAM の y は +16 オフセット)
             let screen_y = y.wrapping_sub(16);
             if self.ly >= screen_y && self.ly < screen_y.wrapping_add(sprite_height) {
-                self.sprite_buffer.push(SpriteData { x, y, tile_num, flags });
+                let _ = self.sprite_buffer.push(SpriteData { x, y, tile_num, flags, order: i as u8 });
             }
         }
-        // X 座標で安定ソート（小さい X が優先）
-        self.sprite_buffer.sort_by_key(|s| s.x);
+        // X 座標で安定ソート（小さい X が優先、同値は OAM 順）。
+        // heapless::Vec は alloc 依存の sort_by_key を持たないため slice の
+        // sort_unstable_by を使い、order を第二鍵にして安定性を確保する。
+        self.sprite_buffer
+            .sort_unstable_by(|a, b| a.x.cmp(&b.x).then(a.order.cmp(&b.order)));
     }
 
     fn render_sprites(&mut self) {

@@ -1,10 +1,10 @@
 use super::Cpu;
 use super::exec;
 use super::operand::Operand;
-use crate::mmu::Mmu;
+use crate::mmu::MemoryBus;
 
 /// 1 M-cycle分の制御を行い、命令完了で `true` を返す実行関数。
-pub type ExecFn = fn(&mut Cpu, &mut Mmu) -> bool;
+pub type ExecFn = fn(&mut Cpu, &mut dyn MemoryBus) -> bool;
 
 /// 自己完結した命令実行ユニット。
 #[derive(Clone, Copy)]

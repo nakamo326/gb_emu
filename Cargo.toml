@@ -1,19 +1,5 @@
-[package]
-name = "db-emu"
-version = "0.1.0"
-edition = "2024"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-sdl2 = { version = "0.35.2", default-features = false, features = [
-  "raw-window-handle",
-] }
-
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-sdl2 = { version = "0.35.2", default-features = false, features = [
-  "bundled",
-  "raw-window-handle",
-  "static-link",
-] }
-
-[features]
-default = []
+[workspace]
+resolver = "2"
+# teensy クレートはクロスターゲット(thumbv7em)専用のため members に含めず、
+# 個別に `cargo build -p gb-teensy --target thumbv7em-none-eabihf` でビルドする。
+members = ["core", "host"]

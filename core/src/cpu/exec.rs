@@ -5,7 +5,7 @@
 use super::Cpu;
 use super::decode;
 use super::operand::{Cond, Indirect, Operand, Reg8, Reg16};
-use crate::mmu::Mmu;
+use crate::mmu::MemoryBus;
 
 // ──────────────────────────────────────────────
 // Cpu ヘルパー(オペランドアクセス・演算)
@@ -79,7 +79,7 @@ impl Cpu {
         }
     }
     /// PC から1バイト読み、PC を進める
-    fn imm8(&mut self, bus: &Mmu) -> u8 {
+    fn imm8(&mut self, bus: &dyn MemoryBus) -> u8 {
         let v = bus.read(self.regs.pc);
         self.regs.pc = self.regs.pc.wrapping_add(1);
         v
@@ -235,7 +235,7 @@ impl Cpu {
 
 /// src オペランドの値を `cpu.wz` に読み込む。
 /// レジスタなら0サイクルで `true`、Imm/Ind なら1サイクル消費して `false` を返す。
-fn load_src8(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+fn load_src8(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.src {
         Operand::Reg8(r) => {
             cpu.wz = cpu.read_reg8(r) as u16;
@@ -257,12 +257,12 @@ fn load_src8(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 // ──────────────────────────────────────────────
 // LD
 // ──────────────────────────────────────────────
-pub(crate) fn exec_nop(_cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_nop(_cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     true
 }
 
 /// LD 8bit: r,r / r,n / r,(ind) / (ind),r / (ind),n / A,(C) / (C),A
-pub(crate) fn exec_ld8(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ld8(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     loop {
         match cpu.instr.step {
             0 => match cpu.instr.src {
@@ -303,7 +303,7 @@ pub(crate) fn exec_ld8(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// LD A,(a16) (0xFA)
-pub(crate) fn exec_ld_a_abs(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ld_a_abs(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = cpu.imm8(bus) as u16;
@@ -326,7 +326,7 @@ pub(crate) fn exec_ld_a_abs(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// LD (a16),A (0xEA)
-pub(crate) fn exec_ld_abs_a(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ld_abs_a(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = cpu.imm8(bus) as u16;
@@ -349,7 +349,7 @@ pub(crate) fn exec_ld_abs_a(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// LDH A,(a8) (0xF0)
-pub(crate) fn exec_ldh_a_n(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ldh_a_n(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = 0xFF00 | cpu.imm8(bus) as u16;
@@ -367,7 +367,7 @@ pub(crate) fn exec_ldh_a_n(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// LDH (a8),A (0xE0)
-pub(crate) fn exec_ldh_n_a(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ldh_n_a(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = 0xFF00 | cpu.imm8(bus) as u16;
@@ -385,7 +385,7 @@ pub(crate) fn exec_ldh_n_a(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// LD rr,d16
-pub(crate) fn exec_ld16(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ld16(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = cpu.imm8(bus) as u16;
@@ -406,7 +406,7 @@ pub(crate) fn exec_ld16(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// LD (a16),SP (0x08)
-pub(crate) fn exec_ld_nn_sp(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ld_nn_sp(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = cpu.imm8(bus) as u16;
@@ -434,7 +434,7 @@ pub(crate) fn exec_ld_nn_sp(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// LD SP,HL (0xF9)
-pub(crate) fn exec_ld_sp_hl(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ld_sp_hl(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.regs.sp = cpu.regs.hl();
@@ -447,7 +447,7 @@ pub(crate) fn exec_ld_sp_hl(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
 }
 
 /// LD HL,SP+e8 (0xF8)
-pub(crate) fn exec_ldhl(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ldhl(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             let e = cpu.imm8(bus) as i8 as i16 as u16;
@@ -474,7 +474,7 @@ pub(crate) fn exec_ldhl(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 // ──────────────────────────────────────────────
 macro_rules! alu_exec {
     ($name:ident, $op:ident) => {
-        pub(crate) fn $name(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+        pub(crate) fn $name(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
             match cpu.instr.step {
                 0 => {
                     if load_src8(cpu, bus) {
@@ -504,7 +504,7 @@ alu_exec!(exec_xor, alu_xor);
 alu_exec!(exec_cp, alu_cp);
 
 /// INC r / INC (HL)
-pub(crate) fn exec_inc8(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_inc8(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => match cpu.instr.dst {
             Operand::Reg8(r) => {
@@ -534,7 +534,7 @@ pub(crate) fn exec_inc8(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// DEC r / DEC (HL)
-pub(crate) fn exec_dec8(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_dec8(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => match cpu.instr.dst {
             Operand::Reg8(r) => {
@@ -564,7 +564,7 @@ pub(crate) fn exec_dec8(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// INC rr (2 M-cycle)
-pub(crate) fn exec_inc16(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_inc16(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             let r = cpu.instr.dst.reg16();
@@ -579,7 +579,7 @@ pub(crate) fn exec_inc16(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
 }
 
 /// DEC rr (2 M-cycle)
-pub(crate) fn exec_dec16(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_dec16(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             let r = cpu.instr.dst.reg16();
@@ -594,7 +594,7 @@ pub(crate) fn exec_dec16(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
 }
 
 /// ADD HL,rr (2 M-cycle)
-pub(crate) fn exec_add_hl(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_add_hl(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             let v = cpu.read_reg16(cpu.instr.src.reg16());
@@ -613,7 +613,7 @@ pub(crate) fn exec_add_hl(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
 }
 
 /// ADD SP,e8 (4 M-cycle)
-pub(crate) fn exec_add_sp(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_add_sp(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             let e = cpu.imm8(bus) as i8 as i16 as u16;
@@ -642,7 +642,7 @@ pub(crate) fn exec_add_sp(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 // ──────────────────────────────────────────────
 // フラグ操作・A ローテート(各1 M-cycle)
 // ──────────────────────────────────────────────
-pub(crate) fn exec_daa(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_daa(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     let mut a = cpu.regs.a;
     if !cpu.regs.nf() {
         if cpu.regs.cf() || a > 0x99 {
@@ -666,21 +666,21 @@ pub(crate) fn exec_daa(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
     true
 }
 
-pub(crate) fn exec_cpl(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_cpl(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     cpu.regs.a = !cpu.regs.a;
     cpu.regs.set_nf(true);
     cpu.regs.set_hf(true);
     true
 }
 
-pub(crate) fn exec_scf(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_scf(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     cpu.regs.set_nf(false);
     cpu.regs.set_hf(false);
     cpu.regs.set_cf(true);
     true
 }
 
-pub(crate) fn exec_ccf(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ccf(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     let c = cpu.regs.cf();
     cpu.regs.set_nf(false);
     cpu.regs.set_hf(false);
@@ -688,7 +688,7 @@ pub(crate) fn exec_ccf(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
     true
 }
 
-pub(crate) fn exec_rlca(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_rlca(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     let a = cpu.regs.a;
     let c = a & 0x80 != 0;
     cpu.regs.a = (a << 1) | c as u8;
@@ -699,7 +699,7 @@ pub(crate) fn exec_rlca(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
     true
 }
 
-pub(crate) fn exec_rrca(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_rrca(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     let a = cpu.regs.a;
     let c = a & 0x01 != 0;
     cpu.regs.a = (a >> 1) | ((c as u8) << 7);
@@ -710,7 +710,7 @@ pub(crate) fn exec_rrca(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
     true
 }
 
-pub(crate) fn exec_rla(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_rla(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     let a = cpu.regs.a;
     let oc = cpu.regs.cf() as u8;
     let nc = a & 0x80 != 0;
@@ -722,7 +722,7 @@ pub(crate) fn exec_rla(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
     true
 }
 
-pub(crate) fn exec_rra(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_rra(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     let a = cpu.regs.a;
     let oc = cpu.regs.cf() as u8;
     let nc = a & 0x01 != 0;
@@ -738,14 +738,14 @@ pub(crate) fn exec_rra(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
 // CB プリフィックス
 // ──────────────────────────────────────────────
 /// CB プリフィックス: 次バイトを読んで本来の CB 命令へ差し替える(1 M-cycle)
-pub(crate) fn exec_cb_prefix(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_cb_prefix(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     let cb = cpu.imm8(bus);
     cpu.instr = decode::decode_cb(cb);
     false
 }
 
 /// CB ローテート/シフト系の read-modify-write 共通処理
-fn cb_rmw(cpu: &mut Cpu, bus: &mut Mmu, f: fn(&mut Cpu, u8) -> u8) -> bool {
+fn cb_rmw(cpu: &mut Cpu, bus: &mut dyn MemoryBus, f: fn(&mut Cpu, u8) -> u8) -> bool {
     match cpu.instr.step {
         0 => match cpu.instr.dst {
             Operand::Reg8(r) => {
@@ -776,7 +776,7 @@ fn cb_rmw(cpu: &mut Cpu, bus: &mut Mmu, f: fn(&mut Cpu, u8) -> u8) -> bool {
 
 macro_rules! cb_exec {
     ($name:ident, $t:ident) => {
-        pub(crate) fn $name(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+        pub(crate) fn $name(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
             cb_rmw(cpu, bus, Cpu::$t)
         }
     };
@@ -791,7 +791,7 @@ cb_exec!(exec_cb_swap, swap_t);
 cb_exec!(exec_cb_srl, srl_t);
 
 /// BIT n,r / BIT n,(HL)
-pub(crate) fn exec_cb_bit(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_cb_bit(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     let n = cpu.instr.src.bit();
     match cpu.instr.step {
         0 => match cpu.instr.dst {
@@ -817,7 +817,7 @@ pub(crate) fn exec_cb_bit(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// RES/SET n の共通処理
-fn cb_setres(cpu: &mut Cpu, bus: &mut Mmu, set: bool) -> bool {
+fn cb_setres(cpu: &mut Cpu, bus: &mut dyn MemoryBus, set: bool) -> bool {
     let n = cpu.instr.src.bit();
     let apply = |v: u8| if set { v | (1 << n) } else { v & !(1 << n) };
     match cpu.instr.step {
@@ -846,10 +846,10 @@ fn cb_setres(cpu: &mut Cpu, bus: &mut Mmu, set: bool) -> bool {
         _ => unreachable!(),
     }
 }
-pub(crate) fn exec_cb_res(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_cb_res(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     cb_setres(cpu, bus, false)
 }
-pub(crate) fn exec_cb_set(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_cb_set(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     cb_setres(cpu, bus, true)
 }
 
@@ -864,7 +864,7 @@ fn taken(cpu: &Cpu) -> bool {
 }
 
 /// JP nn / JP cc,nn
-pub(crate) fn exec_jp(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_jp(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = cpu.imm8(bus) as u16;
@@ -887,13 +887,13 @@ pub(crate) fn exec_jp(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// JP HL (1 M-cycle)
-pub(crate) fn exec_jp_hl(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_jp_hl(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     cpu.regs.pc = cpu.regs.hl();
     true
 }
 
 /// JR e / JR cc,e
-pub(crate) fn exec_jr(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_jr(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = cpu.imm8(bus) as i8 as u16;
@@ -911,7 +911,7 @@ pub(crate) fn exec_jr(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// CALL nn / CALL cc,nn
-pub(crate) fn exec_call(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_call(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = cpu.imm8(bus) as u16;
@@ -946,7 +946,7 @@ pub(crate) fn exec_call(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// RET (4 M-cycle)
-pub(crate) fn exec_ret(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ret(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = bus.read(cpu.regs.sp) as u16;
@@ -973,7 +973,7 @@ pub(crate) fn exec_ret(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// RETI (4 M-cycle)
-pub(crate) fn exec_reti(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_reti(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = bus.read(cpu.regs.sp) as u16;
@@ -1001,7 +1001,7 @@ pub(crate) fn exec_reti(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// RET cc (条件付き)
-pub(crate) fn exec_ret_cc(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ret_cc(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.instr.step = if taken(cpu) { 1 } else { 5 };
@@ -1033,7 +1033,7 @@ pub(crate) fn exec_ret_cc(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// RST n (4 M-cycle)
-pub(crate) fn exec_rst(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_rst(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.instr.step = 1;
@@ -1061,7 +1061,7 @@ pub(crate) fn exec_rst(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 // スタック
 // ──────────────────────────────────────────────
 /// PUSH rr (4 M-cycle)
-pub(crate) fn exec_push(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_push(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = cpu.read_reg16(cpu.instr.src.reg16());
@@ -1086,7 +1086,7 @@ pub(crate) fn exec_push(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 }
 
 /// POP rr (3 M-cycle)
-pub(crate) fn exec_pop(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_pop(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
             cpu.wz = bus.read(cpu.regs.sp) as u16;
@@ -1111,8 +1111,8 @@ pub(crate) fn exec_pop(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
 // ──────────────────────────────────────────────
 // 制御・割り込み
 // ──────────────────────────────────────────────
-pub(crate) fn exec_halt(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
-    let pending = bus.ie & bus.if_ & 0x1F;
+pub(crate) fn exec_halt(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
+    let pending = bus.ie() & bus.if_() & 0x1F;
     if !cpu.ime && pending != 0 {
         // HALT バグ: HALT に入らず、次の fetch で PC をインクリメントしない
         cpu.halt_bug = true;
@@ -1122,18 +1122,18 @@ pub(crate) fn exec_halt(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
     true
 }
 
-pub(crate) fn exec_stop(_cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_stop(_cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     // STOP は NOP として扱う(GBC速度切替は未実装)
     true
 }
 
-pub(crate) fn exec_di(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_di(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     cpu.ime = false;
     cpu.ei_delay = false;
     true
 }
 
-pub(crate) fn exec_ei(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
+pub(crate) fn exec_ei(cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
     // IME は次の命令終了後に有効化
     cpu.ei_delay = true;
     true
@@ -1145,14 +1145,14 @@ pub(crate) fn exec_ei(cpu: &mut Cpu, _bus: &mut Mmu) -> bool {
 /// M3: PCH プッシュ
 /// M4: PCL プッシュ
 /// M5: PC ← ベクタ
-pub(crate) fn exec_interrupt(cpu: &mut Cpu, bus: &mut Mmu) -> bool {
+pub(crate) fn exec_interrupt(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     match cpu.instr.step {
         0 => {
-            let pending = bus.ie & bus.if_ & 0x1F;
+            let pending = bus.ie() & bus.if_() & 0x1F;
             cpu.ime = false;
             for bit in 0..5u8 {
                 if pending & (1 << bit) != 0 {
-                    bus.if_ &= !(1 << bit);
+                    bus.set_if(bus.if_() & !(1 << bit));
                     cpu.wz = 0x0040u16 + (bit as u16) * 0x08;
                     break;
                 }

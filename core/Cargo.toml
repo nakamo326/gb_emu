@@ -1,0 +1,12 @@
+[package]
+name = "gb-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+heapless = "0.8"
+
+[features]
+default = []
+# blargg テスト ROM のシリアル/外部RAM出力検知（host のみ有効）
+test-harness = []

@@ -695,17 +695,16 @@ impl Apu {
         }
     }
 
-    /// 1 M-cycle 進める。生成されたサンプル（ステレオ f32 ペア）を返す。
-    /// 戻り値は空か [left, right] の 2 要素。
-    pub fn emulate_cycle(&mut self) -> Vec<f32> {
+    /// 1 M-cycle 進める。サンプリングタイミングなら `Some((left, right))` を返す。
+    pub fn emulate_cycle(&mut self) -> Option<(f32, f32)> {
         if !self.powered {
             // 無音サンプルでカウンタを回す
             self.sample_frac += SAMPLE_RATE;
             if self.sample_frac >= CPU_M_CYCLES_PER_SEC {
                 self.sample_frac -= CPU_M_CYCLES_PER_SEC;
-                return vec![0.0, 0.0];
+                return Some((0.0, 0.0));
             }
-            return vec![];
+            return None;
         }
 
         // 1. Frame Sequencer クロック
@@ -726,9 +725,9 @@ impl Apu {
         if self.sample_frac >= CPU_M_CYCLES_PER_SEC {
             self.sample_frac -= CPU_M_CYCLES_PER_SEC;
             let (l, r) = self.mix();
-            return vec![l, r];
+            return Some((l, r));
         }
-        vec![]
+        None
     }
 
     fn clock_frame_sequencer(&mut self) {

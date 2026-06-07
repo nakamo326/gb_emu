@@ -1,16 +1,26 @@
 use crate::apu::Apu;
 use crate::bootrom::Bootrom;
-use crate::cartridge::Cartridge;
 use crate::hram::HRam;
 use crate::input::ButtonState;
 use crate::joypad::Joypad;
+use crate::platform::CartridgeBus;
 use crate::ppu::Ppu;
 use crate::timer::Timer;
 use crate::wram::WRam;
 
-pub struct Mmu {
+/// CPU から見たメモリバス抽象。`CartridgeBus` の具象型を型消去し、
+/// CPU と命令テーブル(`ExecFn`)を非ジェネリックに保つためのトレイト。
+pub trait MemoryBus {
+    fn read(&self, addr: u16) -> u8;
+    fn write(&mut self, addr: u16, val: u8);
+    fn if_(&self) -> u8;
+    fn set_if(&mut self, val: u8);
+    fn ie(&self) -> u8;
+}
+
+pub struct Mmu<C: CartridgeBus> {
     pub bootrom: Bootrom,
-    pub cartridge: Option<Cartridge>,
+    pub cart: C,
     pub wram: WRam,
     pub hram: HRam,
     pub ppu: Ppu,
@@ -23,43 +33,27 @@ pub struct Mmu {
     pub ie: u8,
     /// シリアルデータ (0xFF01)
     serial_data: u8,
-    /// シリアル出力バッファ（テスト終了検知用）
-    serial_buf: String,
-    /// テスト終了フラグ
-    pub test_done: bool,
-    /// 外部RAM監視バッファ ($A000-$A003 + テキスト)
-    ram_monitor: [u8; 4],
-    ram_text_buf: Vec<u8>,
-    ram_sig_ok: bool,
+    /// blargg テスト ROM の出力監視（host のみ）
+    #[cfg(feature = "test-harness")]
+    pub test: TestHarness,
 }
 
-impl Mmu {
-    pub fn new() -> Self {
-        let bootrom = Bootrom::new("dmg_bootrom.bin");
-        let wram = WRam::new();
-        let hram = HRam::new();
-        let ppu = Ppu::new();
-        let timer = Timer::new();
-        let joypad = Joypad::new();
-        let apu = Apu::new();
-
+impl<C: CartridgeBus> Mmu<C> {
+    pub fn new(bootrom: Bootrom, cart: C) -> Self {
         Self {
             bootrom,
-            cartridge: None,
-            wram,
-            hram,
-            ppu,
-            timer,
-            joypad,
-            apu,
+            cart,
+            wram: WRam::new(),
+            hram: HRam::new(),
+            ppu: Ppu::new(),
+            timer: Timer::new(),
+            joypad: Joypad::new(),
+            apu: Apu::new(),
             if_: 0,
             ie: 0,
             serial_data: 0,
-            serial_buf: String::new(),
-            test_done: false,
-            ram_monitor: [0x80, 0, 0, 0],
-            ram_text_buf: Vec::new(),
-            ram_sig_ok: false,
+            #[cfg(feature = "test-harness")]
+            test: TestHarness::new(),
         }
     }
 
@@ -105,30 +99,16 @@ impl Mmu {
         }
     }
 
-    pub fn load_cartridge(&mut self, rom_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let cartridge = Cartridge::new(rom_path)?;
-        self.cartridge = Some(cartridge);
-        Ok(())
-    }
-
     pub fn read(&self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x00FF => {
                 if self.bootrom.is_active() {
                     self.bootrom.read(addr)
-                } else if let Some(cartridge) = &self.cartridge {
-                    cartridge.read(addr)
                 } else {
-                    0xFF
+                    self.cart.read(addr)
                 }
             }
-            0x0100..=0x7FFF | 0xA000..=0xBFFF => {
-                if let Some(cartridge) = &self.cartridge {
-                    cartridge.read(addr)
-                } else {
-                    0xFF
-                }
-            }
+            0x0100..=0x7FFF | 0xA000..=0xBFFF => self.cart.read(addr),
             0x8000..=0x9FFF => self.ppu.read(addr),
             0xFE00..=0xFE9F => self.ppu.read(addr),
             0xFF00 => self.joypad.read(),
@@ -149,30 +129,9 @@ impl Mmu {
     pub fn write(&mut self, addr: u16, val: u8) {
         match addr {
             0x0000..=0x7FFF | 0xA000..=0xBFFF => {
-                if let Some(cartridge) = &mut self.cartridge {
-                    cartridge.write(addr, val);
-                }
-                // blargg v2テスト: 外部RAMへの結果書き込みを監視
-                if addr >= 0xA000 && addr <= 0xA003 {
-                    self.ram_monitor[(addr - 0xA000) as usize] = val;
-                    // シグネチャ確認: $A001=$DE, $A002=$B0, $A003=$61
-                    if self.ram_monitor[1] == 0xDE && self.ram_monitor[2] == 0xB0 && self.ram_monitor[3] == 0x61 {
-                        self.ram_sig_ok = true;
-                    }
-                    // $A000 != 0x80 かつシグネチャあり = テスト完了
-                    if self.ram_sig_ok && addr == 0xA000 && val != 0x80 {
-                        use std::io::Write;
-                        let text = String::from_utf8_lossy(&self.ram_text_buf).into_owned();
-                        print!("{}", text);
-                        let _ = std::io::stdout().flush();
-                        self.test_done = true;
-                    }
-                } else if addr >= 0xA004 && addr < 0xB000 {
-                    // テキスト出力バッファに追記
-                    if val != 0 {
-                        self.ram_text_buf.push(val);
-                    }
-                }
+                self.cart.write(addr, val);
+                #[cfg(feature = "test-harness")]
+                self.test.on_cart_write(addr, val);
             }
             0x8000..=0x9FFF => self.ppu.write(addr, val),
             0xFE00..=0xFE9F => self.ppu.write(addr, val),
@@ -181,15 +140,8 @@ impl Mmu {
             0xFF02 => {
                 // シリアル転送: bit7 がセットされたら文字を出力（blargg テスト用）
                 if val & 0x80 != 0 {
-                    let c = self.serial_data as char;
-                    print!("{}", c);
-                    use std::io::Write;
-                    let _ = std::io::stdout().flush();
-                    self.serial_buf.push(c);
-                    // blargg テストは "Passed" または "Failed" で終了
-                    if self.serial_buf.contains("Passed") || self.serial_buf.contains("Failed") {
-                        self.test_done = true;
-                    }
+                    #[cfg(feature = "test-harness")]
+                    self.test.on_serial(self.serial_data);
                 }
             }
             0xFF04..=0xFF07 => self.timer.write(addr, val),
@@ -210,5 +162,90 @@ impl Mmu {
             0xFFFF => self.ie = val,
             _ => {}
         }
+    }
+}
+
+/// blargg テスト ROM のシリアル/外部RAM出力を監視するハーネス（host 専用）。
+///
+/// 標準出力は行わず、出力バイトを `serial_log` / `ram_text_buf` に蓄積し、
+/// "Passed"/"Failed" 検出または外部RAMシグネチャで `test_done` を立てる。
+/// host 側はこれらのバッファを読んで標準出力へ流す。
+#[cfg(feature = "test-harness")]
+pub struct TestHarness {
+    /// シリアル(0xFF01/0xFF02)経由の出力ログ
+    pub serial_log: heapless::Vec<u8, 8192>,
+    /// 外部RAM経由(blargg v2)のテキスト出力
+    pub ram_text_buf: heapless::Vec<u8, 8192>,
+    /// テスト完了フラグ
+    pub test_done: bool,
+    /// 外部RAM監視バッファ ($A000-$A003)
+    ram_monitor: [u8; 4],
+    ram_sig_ok: bool,
+}
+
+#[cfg(feature = "test-harness")]
+impl TestHarness {
+    fn new() -> Self {
+        Self {
+            serial_log: heapless::Vec::new(),
+            ram_text_buf: heapless::Vec::new(),
+            test_done: false,
+            ram_monitor: [0x80, 0, 0, 0],
+            ram_sig_ok: false,
+        }
+    }
+
+    fn on_serial(&mut self, byte: u8) {
+        let _ = self.serial_log.push(byte);
+        // blargg テストは "Passed" または "Failed" で終了
+        if slice_ends_with(&self.serial_log, b"Passed")
+            || slice_ends_with(&self.serial_log, b"Failed")
+        {
+            self.test_done = true;
+        }
+    }
+
+    fn on_cart_write(&mut self, addr: u16, val: u8) {
+        // blargg v2テスト: 外部RAMへの結果書き込みを監視
+        if (0xA000..=0xA003).contains(&addr) {
+            self.ram_monitor[(addr - 0xA000) as usize] = val;
+            // シグネチャ確認: $A001=$DE, $A002=$B0, $A003=$61
+            if self.ram_monitor[1] == 0xDE
+                && self.ram_monitor[2] == 0xB0
+                && self.ram_monitor[3] == 0x61
+            {
+                self.ram_sig_ok = true;
+            }
+            // $A000 != 0x80 かつシグネチャあり = テスト完了
+            if self.ram_sig_ok && addr == 0xA000 && val != 0x80 {
+                self.test_done = true;
+            }
+        } else if (0xA004..0xB000).contains(&addr) && val != 0 {
+            // テキスト出力バッファに追記
+            let _ = self.ram_text_buf.push(val);
+        }
+    }
+}
+
+#[cfg(feature = "test-harness")]
+fn slice_ends_with(buf: &[u8], pat: &[u8]) -> bool {
+    buf.len() >= pat.len() && &buf[buf.len() - pat.len()..] == pat
+}
+
+impl<C: CartridgeBus> MemoryBus for Mmu<C> {
+    fn read(&self, addr: u16) -> u8 {
+        Mmu::read(self, addr)
+    }
+    fn write(&mut self, addr: u16, val: u8) {
+        Mmu::write(self, addr, val)
+    }
+    fn if_(&self) -> u8 {
+        self.if_
+    }
+    fn set_if(&mut self, val: u8) {
+        self.if_ = val;
+    }
+    fn ie(&self) -> u8 {
+        self.ie
     }
 }
