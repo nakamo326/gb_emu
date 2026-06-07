@@ -1,23 +1,95 @@
-use super::{
-    Cpu,
-    instructions::{go, step},
-};
+//! CPU命令の型定義。
+//! 命令は「現在のステップ(状態)・オペランド(参照)・実行関数」を持つ自己完結ユニット `Instr` として表現する。
+//! オペランドの性質(Reg/Imm/Ind/...)と命令の性質(exec関数)を分離し、オペコードはその合成。
 
+use super::Cpu;
+use super::exec;
 use crate::mmu::Mmu;
 
-use std::sync::atomic::{AtomicU8, AtomicU16, Ordering::Relaxed};
+/// 1 M-cycle分の制御を行い、命令完了で `true` を返す実行関数。
+pub type ExecFn = fn(&mut Cpu, &mut Mmu) -> bool;
 
-pub trait IO8<T: Copy> {
-    fn read8(&mut self, bus: &Mmu, src: T) -> Option<u8>;
-    fn write8(&mut self, bus: &mut Mmu, dst: T, val: u8) -> Option<()>;
+/// 自己完結した命令実行ユニット。
+#[derive(Clone, Copy)]
+pub struct Instr {
+    /// 現在のマイクロステップ(命令自身の状態)
+    pub step: u8,
+    /// 書き込み先オペランド
+    pub dst: Operand,
+    /// 読み出し元オペランド / 補助オペランド(条件・ビット番号など)
+    pub src: Operand,
+    /// 各ステップの制御内容。完了で true
+    pub exec: ExecFn,
 }
 
-pub trait IO16<T: Copy> {
-    fn read16(&mut self, bus: &Mmu, src: T) -> Option<u16>;
-    fn write16(&mut self, bus: &mut Mmu, dst: T, val: u16) -> Option<()>;
+impl Instr {
+    /// オペランドなしの命令(NOP / フラグ操作 / 制御命令など)
+    pub fn simple(exec: ExecFn) -> Self {
+        Self { step: 0, dst: Operand::None, src: Operand::None, exec }
+    }
+    /// dst/src を伴う命令
+    pub fn with(dst: Operand, src: Operand, exec: ExecFn) -> Self {
+        Self { step: 0, dst, src, exec }
+    }
+    /// 割り込みディスパッチ(疑似命令)
+    pub fn interrupt() -> Self {
+        Self::simple(exec::exec_interrupt)
+    }
+    /// 初期値(最初の emulate_cycle で decode により上書きされる)
+    pub fn nop() -> Self {
+        Self::simple(exec::exec_nop)
+    }
 }
 
-#[derive(Clone, Copy, Debug)]
+/// オペランドの性質を1つの enum で表現(命令の合成要素)。
+#[derive(Clone, Copy)]
+pub enum Operand {
+    None,
+    Reg8(Reg8),
+    Reg16(Reg16),
+    Imm,
+    Ind(Indirect),
+    Cond(Cond),
+    Bit(u8),
+    Rst(u8),
+}
+
+impl Operand {
+    pub fn reg16(self) -> Reg16 {
+        match self {
+            Operand::Reg16(r) => r,
+            _ => unreachable!(),
+        }
+    }
+    pub fn ind(self) -> Indirect {
+        match self {
+            Operand::Ind(i) => i,
+            _ => unreachable!(),
+        }
+    }
+    pub fn bit(self) -> u8 {
+        match self {
+            Operand::Bit(b) => b,
+            _ => unreachable!(),
+        }
+    }
+    pub fn rst(self) -> u8 {
+        match self {
+            Operand::Rst(a) => a,
+            _ => unreachable!(),
+        }
+    }
+    /// 条件を取り出す。None の場合は無条件(常に成立)。
+    pub fn cond(self) -> Option<Cond> {
+        match self {
+            Operand::Cond(c) => Some(c),
+            Operand::None => None,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub enum Reg8 {
     A,
     B,
@@ -28,7 +100,7 @@ pub enum Reg8 {
     L,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub enum Reg16 {
     AF,
     BC,
@@ -37,275 +109,22 @@ pub enum Reg16 {
     SP,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Imm8;
-
-#[derive(Clone, Copy, Debug)]
-pub struct Imm16;
-
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
+#[allow(clippy::upper_case_acronyms)] // GB レジスタ表記の慣習に合わせる
 pub enum Indirect {
     BC,
     DE,
     HL,
-    CFF,
-    HLD,
     HLI,
+    HLD,
+    /// 0xFF00 | C
+    CFF,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum Direct8 {
-    D,
-    DFF,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Direct16;
-
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub enum Cond {
     NZ,
     Z,
     NC,
     C,
-}
-
-// レジスタのみの操作はcycleを消費しない
-impl IO8<Reg8> for Cpu {
-    fn read8(&mut self, _: &Mmu, src: Reg8) -> Option<u8> {
-        match src {
-            Reg8::A => Some(self.regs.a),
-            Reg8::B => Some(self.regs.b),
-            Reg8::C => Some(self.regs.c),
-            Reg8::D => Some(self.regs.d),
-            Reg8::E => Some(self.regs.e),
-            Reg8::H => Some(self.regs.h),
-            Reg8::L => Some(self.regs.l),
-        }
-    }
-
-    fn write8(&mut self, _: &mut Mmu, dst: Reg8, val: u8) -> Option<()> {
-        match dst {
-            Reg8::A => Some(self.regs.a = val),
-            Reg8::B => Some(self.regs.b = val),
-            Reg8::C => Some(self.regs.c = val),
-            Reg8::D => Some(self.regs.d = val),
-            Reg8::E => Some(self.regs.e = val),
-            Reg8::H => Some(self.regs.h = val),
-            Reg8::L => Some(self.regs.l = val),
-        }
-    }
-}
-
-impl IO16<Reg16> for Cpu {
-    fn read16(&mut self, _: &Mmu, src: Reg16) -> Option<u16> {
-        match src {
-            Reg16::AF => Some(self.regs.af()),
-            Reg16::BC => Some(self.regs.bc()),
-            Reg16::DE => Some(self.regs.de()),
-            Reg16::HL => Some(self.regs.hl()),
-            Reg16::SP => Some(self.regs.sp),
-        }
-    }
-
-    fn write16(&mut self, _: &mut Mmu, dst: Reg16, val: u16) -> Option<()> {
-        match dst {
-            Reg16::AF => Some(self.regs.write_af(val)),
-            Reg16::BC => Some(self.regs.write_bc(val)),
-            Reg16::DE => Some(self.regs.write_de(val)),
-            Reg16::HL => Some(self.regs.write_hl(val)),
-            Reg16::SP => Some(self.regs.sp = val),
-        }
-    }
-}
-
-impl IO8<Imm8> for Cpu {
-    fn read8(&mut self, bus: &Mmu, _: Imm8) -> Option<u8> {
-        step!(None, {
-            0: {
-                VAL8.store(bus.read(self.regs.pc), Relaxed);
-                self.regs.pc = self.regs.pc.wrapping_add(1);
-                go!(1);
-                return None;
-            },
-            1: {
-                go!(0);
-                return Some(VAL8.load(Relaxed));
-            },
-        });
-    }
-
-    fn write8(&mut self, _: &mut Mmu, _: Imm8, _: u8) -> Option<()> {
-        unreachable!()
-    }
-}
-
-impl IO16<Imm16> for Cpu {
-    fn read16(&mut self, bus: &Mmu, _: Imm16) -> Option<u16> {
-        step!(None, {
-            0: if let Some(lo) = self.read8(bus, Imm8) {
-                VAL8.store(lo, Relaxed);
-                go!(1);
-            },
-            1: if let Some(hi) = self.read8(bus, Imm8) {
-                VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
-                go!(2);
-            },
-            2: {
-                go!(0);
-                return Some(VAL16.load(Relaxed));
-            },
-        });
-    }
-
-    fn write16(&mut self, _: &mut Mmu, _: Imm16, _: u16) -> Option<()> {
-        unreachable!()
-    }
-}
-
-impl IO8<Indirect> for Cpu {
-    fn read8(&mut self, bus: &Mmu, src: Indirect) -> Option<u8> {
-        step!(None, {
-            0: {
-                VAL8.store(match src {
-                    Indirect::BC => bus.read(self.regs.bc()),
-                    Indirect::DE => bus.read(self.regs.de()),
-                    Indirect::HL => bus.read(self.regs.hl()),
-                    Indirect::CFF => bus.read(0xFF00 | (self.regs.c as u16)),
-                    Indirect::HLD => {
-                        let addr = self.regs.hl();
-                        self.regs.write_hl(addr.wrapping_sub(1));
-                        bus.read(addr)
-                    },
-                    Indirect::HLI => {
-                        let addr = self.regs.hl();
-                        self.regs.write_hl(addr.wrapping_add(1));
-                        bus.read(addr)
-                    },
-                }, Relaxed);
-                go!(1);
-                return None;
-            },
-            1: {
-                go!(0);
-                return Some(VAL8.load(Relaxed));
-            },
-        });
-    }
-
-    fn write8(&mut self, bus: &mut Mmu, dst: Indirect, val: u8) -> Option<()> {
-        step!(None, {
-            0: {
-                match dst {
-                    Indirect::BC => bus.write(self.regs.bc(), val),
-                    Indirect::DE => bus.write(self.regs.de(), val),
-                    Indirect::HL => bus.write(self.regs.hl(), val),
-                    Indirect::CFF => bus.write(0xFF00 | (self.regs.c as u16), val),
-                    Indirect::HLD => {
-                        let addr = self.regs.hl();
-                        self.regs.write_hl(addr.wrapping_sub(1));
-                        bus.write(addr, val);
-                    },
-                    Indirect::HLI => {
-                        let addr = self.regs.hl();
-                        self.regs.write_hl(addr.wrapping_add(1));
-                        bus.write(addr, val);
-                    },
-                }
-                go!(1);
-                return None;
-            },
-            1: {
-                go!(0);
-                return Some(());
-            },
-        });
-    }
-}
-
-impl IO8<Direct8> for Cpu {
-    fn read8(&mut self, bus: &Mmu, src: Direct8) -> Option<u8> {
-        step!(None, {
-            0: if let Some(lo) = self.read8(bus, Imm8) {
-                VAL8.store(lo, Relaxed);
-                go!(1);
-                if let Direct8::DFF = src {
-                    VAL16.store(0xFF00 | (lo as u16), Relaxed);
-                    go!(2);
-                }
-            },
-            1: if let Some(hi) = self.read8(bus, Imm8) {
-                VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
-                go!(2);
-            },
-            2: {
-                VAL8.store(bus.read(VAL16.load(Relaxed)), Relaxed);
-                go!(3);
-                return None;
-            },
-            3: {
-                go!(0);
-                return Some(VAL8.load(Relaxed));
-            },
-        });
-    }
-
-    fn write8(&mut self, bus: &mut Mmu, dst: Direct8, val: u8) -> Option<()> {
-        step!(None, {
-            0: if let Some(lo) = self.read8(bus, Imm8) {
-                VAL8.store(lo, Relaxed);
-                go!(1);
-                if let Direct8::DFF = dst {
-                    VAL16.store(0xFF00 | (lo as u16), Relaxed);
-                    go!(2);
-                }
-            },
-            1: if let Some(hi) = self.read8(bus, Imm8) {
-                VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
-                go!(2);
-            },
-            2: {
-                bus.write(VAL16.load(Relaxed), val);
-                go!(3);
-                return None;
-            },
-            3: {
-                go!(0);
-                return Some(());
-            },
-        });
-    }
-}
-
-impl IO16<Direct16> for Cpu {
-    fn read16(&mut self, _: &Mmu, _: Direct16) -> Option<u16> {
-        unreachable!()
-    }
-
-    fn write16(&mut self, bus: &mut Mmu, _: Direct16, val: u16) -> Option<()> {
-        step!(None, {
-            0: if let Some(lo) = self.read8(bus,Imm8) {
-                VAL8.store(lo, Relaxed);
-                go!(1);
-            },
-            1: if let Some(hi) = self.read8(bus, Imm8) {
-                    VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
-                    go!(2);
-            },
-            2: {
-                bus.write(VAL16.load(Relaxed), val as u8);
-                go!(3);
-                return None;
-            },
-            3: {
-                bus.write(VAL16.load(Relaxed).wrapping_add(1), (val >> 8) as u8);
-                go!(4);
-                return None;
-            },
-            4: {
-                go!(0);
-                return Some(());
-            },
-        });
-    }
 }

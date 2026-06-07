@@ -1,42 +1,44 @@
 mod decode;
-mod instructions;
+mod exec;
 mod operand;
 mod registers;
 
 use crate::mmu::Mmu;
+use operand::Instr;
 use registers::Registers;
-
-#[derive(Default)]
-struct Ctx {
-    opcode: u8,
-    cb: bool,
-}
 
 pub struct Cpu {
     regs: Registers,
-    ctx: Ctx,
     /// 割り込みマスタ有効フラグ
     pub ime: bool,
     /// EI 命令後の1命令遅延フラグ
     ei_delay: bool,
     /// HALT 状態フラグ
     halted: bool,
-    /// fetch() が呼ばれた直後（命令境界）かどうか
-    at_instruction_start: bool,
     /// HALT バグ: 次の fetch() で PC をインクリメントしない
     halt_bug: bool,
+    /// 実行中の命令ユニット（step を内包）
+    instr: Instr,
+    /// 内部一時レジスタ（即値・アドレス・中間値。実機WZ相当）
+    wz: u16,
+    /// fetch 済みの次オペコード
+    opcode: u8,
+    /// 現命令が完了し、次の命令境界にいるか
+    done: bool,
 }
 
 impl Cpu {
     pub fn new() -> Self {
         Self {
             regs: Registers::new(),
-            ctx: Ctx::default(),
             ime: false,
             ei_delay: false,
             halted: false,
-            at_instruction_start: false,
             halt_bug: false,
+            instr: Instr::nop(),
+            wz: 0,
+            opcode: 0,
+            done: true,
         }
     }
 
@@ -54,69 +56,55 @@ impl Cpu {
         self.regs.pc = 0x0100;
     }
 
+    /// 次のオペコードを先読みする（実機同様のオーバーラップ fetch）
     pub fn fetch(&mut self, bus: &Mmu) {
-        self.ctx.opcode = bus.read(self.regs.pc);
+        self.opcode = bus.read(self.regs.pc);
         if self.halt_bug {
             // HALT バグ: PC をインクリメントしない（次命令の第1オペランドが opcode と同じアドレスになる）
             self.halt_bug = false;
         } else {
             self.regs.pc = self.regs.pc.wrapping_add(1);
         }
-        self.ctx.cb = false;
-        self.at_instruction_start = true;
     }
 
+    /// 1 M-cycle 進める。完了なら次命令を decode、未完了なら現命令を継続する。
     pub fn emulate_cycle(&mut self, bus: &mut Mmu) {
-        if self.at_instruction_start {
-            self.at_instruction_start = false;
-
-            // EI の遅延処理: 前の命令が EI だったら今ここで IME を有効化
-            // ただし EI 直後の1命令は必ず実行してから割り込みをチェックする
+        if self.done {
+            // === 命令境界 ===
+            // EI の遅延処理: 前の命令が EI だったら今ここで IME を有効化。
+            // ただし EI 直後の1命令は必ず実行してから割り込みをチェックする。
             let was_ei_delayed = self.ei_delay;
             if self.ei_delay {
                 self.ei_delay = false;
                 self.ime = true;
             }
 
-            let ie = bus.ie;
-            let if_ = bus.if_;
-            let pending = ie & if_ & 0x1F;
+            let pending = bus.ie & bus.if_ & 0x1F;
 
             // HALT から割り込みで復帰
             if self.halted {
                 if pending != 0 {
                     self.halted = false;
                 } else {
-                    // まだ HALT 中: 命令境界フラグを維持して待機
-                    self.at_instruction_start = true;
+                    // まだ HALT 中: 命令境界を維持して待機
                     return;
                 }
             }
 
-            // 割り込みディスパッチ（EI の直後サイクルはスキップ）
-            if self.ime && pending != 0 && !was_ei_delayed {
-                for bit in 0..5u8 {
-                    if pending & (1 << bit) != 0 {
-                        self.ime = false;
-                        bus.if_ &= !(1 << bit);
-                        let vector = 0x0040u16 + (bit as u16) * 0x08;
-                        // PC をスタックに積む
-                        // fetch() が opcode 読み取り時に PC を +1 しているため、
-                        // 戻るべき命令アドレスは PC - 1（pre-fetch した命令のアドレス）
-                        let return_pc = self.regs.pc.wrapping_sub(1);
-                        self.regs.sp = self.regs.sp.wrapping_sub(1);
-                        bus.write(self.regs.sp, (return_pc >> 8) as u8);
-                        self.regs.sp = self.regs.sp.wrapping_sub(1);
-                        bus.write(self.regs.sp, return_pc as u8);
-                        self.regs.pc = vector;
-                        self.fetch(bus);
-                        return;
-                    }
-                }
-            }
+            // 割り込みディスパッチ（EI の直後サイクルはスキップ）か、通常 decode
+            self.instr = if self.ime && pending != 0 && !was_ei_delayed {
+                Instr::interrupt()
+            } else {
+                decode::decode(self.opcode)
+            };
+            self.done = false;
         }
 
-        self.decode(bus);
+        let exec = self.instr.exec;
+        if exec(self, bus) {
+            self.fetch(bus);
+            self.done = true;
+        }
     }
 }
 
