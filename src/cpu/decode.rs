@@ -1,7 +1,8 @@
 //! オペコードを命令ユニット `Instr` に変換する純粋関数(実行はしない)。
 
 use super::exec::*;
-use super::operand::{Cond, ExecFn, Indirect, Instr, Operand, Reg8, Reg16};
+use super::instr::{ExecFn, Instr};
+use super::operand::{Cond, Indirect, Operand, Reg8, Reg16};
 
 // オペランド構築ショートハンド
 const N: Operand = Operand::None;

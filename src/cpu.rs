@@ -1,10 +1,11 @@
 mod decode;
 mod exec;
+mod instr;
 mod operand;
 mod registers;
 
 use crate::mmu::Mmu;
-use operand::Instr;
+use instr::Instr;
 use registers::Registers;
 
 pub struct Cpu {
