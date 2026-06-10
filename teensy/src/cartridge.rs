@@ -19,8 +19,8 @@
 ///
 /// # 注意
 ///
-/// - GB カートリッジは 5V 系（DMG）または 3.3V 系（GBC）。
-///   Teensy 4.1 は 3.3V のため、5V DMG カートリッジには 74AHCT245 等が必要。
+/// - GB カートリッジは DMG・GBC ともに 5V 系（3.3V に変わるのは GBA から）。
+///   Teensy 4.1 は 3.3V のため、74AHCT245 等のレベル変換が必要。
 /// - IOMUXC は事前に `gpio_port.output(pin)` / `.input(pin)` で GPIO モードに設定すること。
 use gb_core::platform::CartridgeBus;
 use teensy4_bsp as bsp;
