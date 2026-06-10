@@ -15,6 +15,10 @@ cortex-m-rt     = "0.7"
 teensy4-bsp     = "0.4"
 teensy4-panic   = "0.2"
 embedded-hal    = "0.2"
+# SDカード対応: embedded-sdmmc 0.7 は embedded-hal 1.0 が必要なため
+# teensy4-bsp 0.4 (embedded-hal 0.2) とは非互換。
+# 対応方法は docs/teensy_setup_guide.md を参照。
+# embedded-sdmmc  = "0.3"  ← embedded-hal 0.2 互換 (将来追加)
 
 [profile.release]
 codegen-units = 1
