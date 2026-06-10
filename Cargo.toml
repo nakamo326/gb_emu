@@ -3,3 +3,4 @@ resolver = "2"
 # teensy クレートはクロスターゲット(thumbv7em)専用のため members に含めず、
 # 個別に `cargo build -p gb-teensy --target thumbv7em-none-eabihf` でビルドする。
 members = ["core", "host"]
+exclude = ["teensy"]
