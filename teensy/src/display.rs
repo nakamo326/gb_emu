@@ -108,9 +108,9 @@ where
         self.cmd(SWRESET);
         Self::delay_ms(120);
 
-        // スリープ解除
+        // スリープ解除 — ILI9341 データシート: SLPOUT 後 DISPON まで 120ms 必要
         self.cmd(SLPOUT);
-        Self::delay_ms(5);
+        Self::delay_ms(150);
 
         // 電源設定
         self.cmd(PWCTRL1); self.data(&[0x23]);
