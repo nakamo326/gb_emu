@@ -21,6 +21,11 @@ fn main() {
         .text(Memory::Itcm)
         // ROM は include_bytes! で .rodata に埋め込まれ最大数 MB になり得るため、
         // RAM にコピーせず Flash 上 (XIP) に置く。
+        //
+        // 【将来】ROM を SDカードや実カートリッジから読むようになり include_bytes! を
+        // やめたら、.rodata は小さな定数のみになる。その場合はこの行を削除して
+        // imxrt-rt のデフォルト (OCRAM) に戻すと、オンチップ RAM 読み出しで高速化できる。
+        // 詳細: docs/teensy_setup_guide.md「rodata のメモリ配置」
         .rodata(Memory::Flash)
         .data(Memory::Dtcm)
         .bss(Memory::Dtcm)

@@ -236,12 +236,14 @@ teensy_loader_cli --mcu=TEENSY41 -w -v \
 
 ### SDカードから ROM を読み込む (将来対応)
 
-現在 `teensy4-bsp 0.4` は `embedded-hal 0.2` を使用しており、
-`embedded-sdmmc` 最新版 (0.7+, embedded-hal 1.0 必須) と非互換です。
+`teensy4-bsp 0.5` / `imxrt-hal 0.5` は embedded-hal 0.2 と 1.0 の両方を実装するため、
+`embedded-sdmmc` 最新版 (0.7+, embedded-hal 1.0 必須) と組み合わせて実装できます。
+`board::lpspi(...)` の戻り値を embedded-hal 1.0 の `SpiDevice` を満たすようラップして渡します。
 
-以下のいずれかで解決後に対応予定:
-- `teensy4-bsp` が embedded-hal 1.0 対応版 (0.5+) にアップデートされる
-- `embedded-sdmmc 0.3` (embedded-hal 0.2 互換) を使って実装する
+> **メモリの注意**: SD から読んだ ROM を置く RAM バッファは `.bss`/`.uninit` に確保しますが、
+> フル ROM (MBC5 で最大 8MB) はオンチップ RAM (OCRAM 512KB / DTCM 320KB) に収まりません。
+> 「小さい ROM 限定」か「バンク単位のオンデマンド読み込み」が前提になります。
+> あわせて後述の「rodata のメモリ配置」も参照してください。
 
 SDカードを使う場合のハードウェア構成案:
 
@@ -270,4 +272,24 @@ SAI1 (I2S) + PCM5102A DAC で音声出力を実装する。
 ### GB カートリッジの直接読み込み (`teensy/src/cartridge.rs`)
 
 74AHCT245 レベルシフタ経由で実 GB カートリッジのバスに接続する。
+GPIO バスから都度読み出すため ROM バッファは不要で、RAM を圧迫しない。
 詳細は [PORTING_STATUS.md](../PORTING_STATUS.md) のタスク D を参照。
+
+---
+
+## 10. rodata のメモリ配置 (`teensy/build.rs`)
+
+ランタイムは imxrt-rt の `RuntimeBuilder` (`teensy/build.rs`) でメモリ配置を決めている。
+現在 `.rodata(Memory::Flash)` を明示指定しているが、これは **ROM の入手方法に依存した判断**である。
+
+| ROM の入手方法 | ROM の置き場所 | `.rodata` の中身 | 推奨配置 |
+|---|---|---|---|
+| **現在**: `include_bytes!` で埋め込み | `.rodata` (最大数 MB) | ROM 全体 + 定数 | **Flash 必須** |
+| SDカード読み込み | 実行時 RAM バッファ (`.bss`/`.uninit`) | パレット・ILI9341 初期化表等の小定数のみ | OCRAM (デフォルト) |
+| 実カートリッジ直読み (GpioCart) | バッファ不要 (GPIO バス直読み) | 同上、小定数のみ | OCRAM (デフォルト) |
+
+- **なぜ今 Flash か**: `include_bytes!` で埋め込んだ ROM は `.rodata` に入り、MBC1/3/5 で最大数 MB になり得る。
+  imxrt-rt のデフォルト配置先 OCRAM (512KB) には収まらないため、RAM にコピーせず Flash 上 (XIP) に置いている。
+- **将来 OCRAM に戻す条件**: ROM を SDカードや実カートリッジから読むようになり `include_bytes!` をやめたら、
+  `.rodata` は KB 級の小定数だけになる。そのときは `build.rs` の `.rodata(Memory::Flash)` 行を削除し、
+  imxrt-rt のデフォルト (OCRAM) に戻すと、外部 FlexSPI flash の XIP 読み出しより速いオンチップ RAM 読み出しになる。
