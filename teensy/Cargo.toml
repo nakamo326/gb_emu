@@ -11,14 +11,20 @@ bench = false
 [dependencies]
 gb-core         = { path = "../core" }
 cortex-m        = { version = "0.7", features = ["critical-section-single-core"] }
-cortex-m-rt     = "0.7"
-teensy4-bsp     = "0.4"
+# rt フィーチャで imxrt-rt ベースのランタイム (FCB/IVT/FlexRAM 設定/リンカ生成) を利用
+teensy4-bsp     = { version = "0.5", features = ["rt"] }
 teensy4-panic   = "0.2"
+# teensy4-bsp 0.5 / imxrt-hal 0.5 は embedded-hal 0.2 と 1.0 の両方を実装しているため
+# 既存の 0.2 トレイト利用コードはそのまま動作する。
 embedded-hal    = "0.2"
-# SDカード対応: embedded-sdmmc 0.7 は embedded-hal 1.0 が必要なため
-# teensy4-bsp 0.4 (embedded-hal 0.2) とは非互換。
+# SDカード対応: imxrt-hal 0.5 は embedded-hal 1.0 も実装するため、
+# embedded-sdmmc 0.7 (embedded-hal 1.0 必須) と組み合わせ可能になった。
 # 対応方法は docs/teensy_setup_guide.md を参照。
-# embedded-sdmmc  = "0.3"  ← embedded-hal 0.2 互換 (将来追加)
+# embedded-sdmmc  = "0.7"  ← 将来追加
+
+[build-dependencies]
+# build.rs でメモリレイアウトとリンカスクリプト (t4link.x) を生成する
+imxrt-rt        = "0.1"
 
 [profile.release]
 codegen-units = 1

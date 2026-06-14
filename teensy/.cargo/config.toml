@@ -3,6 +3,7 @@ target = "thumbv7em-none-eabihf"
 
 [target.thumbv7em-none-eabihf]
 rustflags = [
-    "-C", "link-arg=-Tlink.x",
-    "-C", "link-arg=-Tdefmt.x",
+    # build.rs の RuntimeBuilder が生成するリンカスクリプト (FCB/IVT/FlexRAM 配置を含む)。
+    # teensy4-bsp(rt) が生成する t4link.x との名前衝突を避けるため独自名を使う。
+    "-C", "link-arg=-Tgb-teensy-link.x",
 ]

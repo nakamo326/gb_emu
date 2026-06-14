@@ -11,7 +11,6 @@ use teensy4_bsp as bsp;
 use teensy4_panic as _;
 
 use bsp::board;
-use cortex_m_rt::entry;
 
 use gb_core::{
     bootrom::Bootrom,
@@ -36,7 +35,7 @@ use sdcard::FlashCart;
 // ROM は Flash に埋め込む。ビルド前に roms/game.gb を配置すること。
 static ROM: &[u8] = include_bytes!("../../roms/game.gb");
 
-#[entry]
+#[bsp::rt::entry]
 fn main() -> ! {
     let board::Resources {
         lpspi4,

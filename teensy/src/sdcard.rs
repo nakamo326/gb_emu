@@ -7,11 +7,10 @@
 ///
 /// # SDカード方式 (将来実装)
 ///
-/// `teensy4-bsp 0.4` は `embedded-hal 0.2` を使っており、
-/// `embedded-sdmmc 0.7` (embedded-hal 1.0 必須) とは非互換。
-/// SDカード対応は以下のいずれかで解決後に実装予定:
-/// - `teensy4-bsp` が embedded-hal 1.0 対応版 (0.5+) にアップデート
-/// - `embedded-sdmmc 0.3` (embedded-hal 0.2 互換) + `embedded-hal-compat` で対応
+/// `teensy4-bsp 0.5` / `imxrt-hal 0.5` は embedded-hal 0.2 と 1.0 の両方を実装するため、
+/// `embedded-sdmmc 0.7` (embedded-hal 1.0 必須) と組み合わせて実装可能。
+/// SPI は `board::lpspi(...)` の戻り値を embedded-hal 1.0 の `SpiDevice` を満たすよう
+/// ラップして渡す。
 use gb_core::platform::CartridgeBus;
 
 // ─────────────────────────────────────────────────────────────────────────────
