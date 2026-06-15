@@ -6,6 +6,8 @@ OBJCOPY       := $(RUSTC_SYSROOT)/lib/rustlib/$(RUSTC_HOST)/bin/rust-objcopy
 CARGO      := cargo
 TARGET     := thumbv7em-none-eabihf
 TEENSY_MCU := TEENSY41
+# WSL からは Windows 側の teensy_loader_cli.exe を呼ぶことで USB 書き込みが安定する。
+# 上書き例: make flash TEENSY_CLI="/mnt/c/Users/nakam/bin/teensy_loader_cli.exe"
 TEENSY_CLI := teensy_loader_cli
 
 ELF := target/$(TARGET)/release/gb-teensy
@@ -24,7 +26,13 @@ hex: build
 	@echo "Generated: $(HEX)"
 
 flash: hex
-	$(TEENSY_CLI) --mcu=$(TEENSY_MCU) -w -v $(HEX)
+	@if echo "$(TEENSY_CLI)" | grep -qi '\.exe$$'; then \
+		HEX_ARG="$$(wslpath -w '$(HEX)')"; \
+	else \
+		HEX_ARG="$(HEX)"; \
+	fi; \
+	echo "$(TEENSY_CLI) --mcu=$(TEENSY_MCU) -w -v $$HEX_ARG"; \
+	$(TEENSY_CLI) --mcu=$(TEENSY_MCU) -w -v "$$HEX_ARG"
 
 deploy: flash
 
