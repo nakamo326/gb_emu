@@ -6,6 +6,11 @@ use embedded_hal::digital::v2::OutputPin;
 const GB_W: u16 = 160;
 const GB_H: u16 = 144;
 
+/// imxrt-hal LPSPI の 1 トランザクション最大フレームサイズ (4096 bit = 512 byte)。
+/// これを超える単一 `spi.write` は `Err(FrameSize)` で送信されないため、
+/// フレームバッファはこのサイズ以下に分割して転送する。
+const SPI_MAX_FRAME_BYTES: usize = 512;
+
 // ILI9341 解像度 240×320 の中央に GB 画像を配置
 const X_START: u16 = (240 - GB_W) / 2;
 const Y_START: u16 = (320 - GB_H) / 2;
@@ -50,8 +55,6 @@ pub struct Ili9341Display<SPI, DC, RST> {
     spi: SPI,
     dc: DC,
     rst: RST,
-    // 160×144 × 2 bytes = 46080 bytes のフレームバッファ (DTCM 上)
-    buf: [u8; (GB_W as usize) * (GB_H as usize) * 2],
 }
 
 impl<SPI, DC, RST> Ili9341Display<SPI, DC, RST>
@@ -64,12 +67,7 @@ where
     /// `spi` には `board::lpspi(...)` の戻り値を渡す。
     /// `dc`・`rst` には `gpio2.output(pin)` の戻り値を渡す。
     pub fn new(spi: SPI, dc: DC, rst: RST) -> Self {
-        let mut d = Self {
-            spi,
-            dc,
-            rst,
-            buf: [0u8; (GB_W as usize) * (GB_H as usize) * 2],
-        };
+        let mut d = Self { spi, dc, rst };
         d.init();
         d
     }
@@ -152,18 +150,28 @@ where
     RST: OutputPin,
 {
     fn draw(&mut self, pixels: &[u8]) {
-        // パレットインデックス → RGB565 に変換してフレームバッファに書き込む
+        // フレームバッファは持たず、256px ずつ RGB565 に変換しながら都度転送する
+        // (ストリーミング描画)。これにより 46KB のバッファをスタックに置かずに済む。
+        //
+        // 重要: imxrt-hal の LPSPI は 1 トランザクションのフレームサイズが
+        // 最大 4096 bit = 512 byte に制限されており、これを超える単一 write は
+        // `Err(FrameSize)` で何も送信しない。そのため 1 チャンク = 256px (512byte) とする。
         let len = pixels.len().min((GB_W as usize) * (GB_H as usize));
-        for i in 0..len {
-            let color = PALETTE[(pixels[i] & 3) as usize];
-            self.buf[i * 2]     = (color >> 8) as u8;
-            self.buf[i * 2 + 1] = color as u8;
-        }
-
-        // ウィンドウを設定して 1 回の SPI 転送でフレーム全体を書き込む
         self.set_window(X_START, Y_START, X_END, Y_END);
         let _ = self.dc.set_high();
-        let buf_len = len * 2;
-        let _ = self.spi.write(&self.buf[..buf_len]);
+
+        const CHUNK_PX: usize = SPI_MAX_FRAME_BYTES / 2; // 256px
+        let mut chunk = [0u8; SPI_MAX_FRAME_BYTES];
+        let mut i = 0;
+        while i < len {
+            let n = (len - i).min(CHUNK_PX);
+            for j in 0..n {
+                let color = PALETTE[(pixels[i + j] & 3) as usize];
+                chunk[j * 2] = (color >> 8) as u8;
+                chunk[j * 2 + 1] = color as u8;
+            }
+            let _ = self.spi.write(&chunk[..n * 2]);
+            i += n;
+        }
     }
 }

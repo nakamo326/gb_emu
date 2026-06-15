@@ -15,7 +15,10 @@ fn main() {
             dtcm: 10, // 320 KB: ベクタ・スタック・静的変数・フレームバッファ
         })
         .stack(Memory::Dtcm)
-        .stack_size(16 * 1024)
+        // GameBoy 構造体 (display の 46KB フレームバッファ + Mmu の PPU/WRAM 約40KB =
+        // 計 ~86KB) を main のスタックローカルとして確保するため、十分なスタックが必要。
+        // 16KB では即スタックオーバーフローしてクラッシュする。DTCM は 320KB あるので余裕。
+        .stack_size(192 * 1024)
         .stack_size_env_override("TEENSY4_STACK_SIZE")
         .vectors(Memory::Dtcm)
         .text(Memory::Itcm)
