@@ -30,4 +30,6 @@ imxrt-rt        = "0.1"
 codegen-units = 1
 debug = true
 lto = true
-opt-level = "z"
+# エミュレータは計算主体なので速度優先で最適化する ("z"=サイズ優先だと大幅に遅い)。
+# .text は ITCM(192KB) に置いており余裕があるためコードサイズ増加は問題ない。
+opt-level = 3
