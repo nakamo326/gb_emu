@@ -19,7 +19,8 @@ use gb_core::{
     platform::NullAudio,
 };
 
-use display::Ili9341Display;
+use display::DmaDisplay;
+use display::panel::Ili9341;
 use input::GpioInput;
 use sdcard::FlashCart;
 
@@ -44,6 +45,7 @@ fn main() -> ! {
     let board::Resources {
         lpspi4,
         mut gpio2,
+        mut dma,
         pins,
         ..
     } = board::t41(board::instances());
@@ -69,7 +71,8 @@ fn main() -> ! {
 
     let dc  = gpio2.output(pins.p9);
     let rst = gpio2.output(pins.p8);
-    let display = Ili9341Display::new(spi, dc, rst);
+    let dma_channel = dma[0].take().unwrap();
+    let display = DmaDisplay::<Ili9341, _, _, _>::new(spi, dc, rst, dma_channel);
 
     // ------- GB コア -------
 
