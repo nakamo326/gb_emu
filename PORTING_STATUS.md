@@ -1,7 +1,7 @@
 # Teensy 4.1 移植 — 現状と残タスク
 
 作成日: 2026-06-10  
-最終更新: 2026-06-11
+最終更新: 2026-06-24
 
 ---
 
@@ -107,6 +107,37 @@ SDL2 状態を 3 ストラクトに分割し、各トレイトを個別実装:
 | `cargo build -p gb-core --target thumbv7em-none-eabihf` | **ビルド成功** |
 | `cargo build`（ワークスペース全体） | 警告のみ・エラーなし |
 
+### 7. Teensy 実機での性能最適化（2026-06-24）
+
+実機でカービィのデモが明らかに遅かった（約 20fps）問題を、DWT サイクルカウンタ
+＋ USB シリアルログによる計測で切り分け、以下を実施した。計測の結果、当初の想定と
+異なり **描画(SPI/DMA)ではなく CPU エミュレーションが律速**であることが判明した。
+
+| 施策 | 効果 | 実装 |
+|---|---|---|
+| **L1 I/D キャッシュ有効化** | emu **48ms→5ms**（約10倍）、fps 20→59 | `main.rs` 起動時に `enable_icache`/`enable_dcache` |
+| **SPI クロック 33MHz 化** | 全画面 DMA 転送 16.7ms→約11ms、`wait=0` | `main.rs` で CCR を直書きし BSP のクランプ回避 |
+| **フレームペーシング** | **59.7fps に固定**＋idle 約11.5ms の余裕 | `main.rs` メインループを DWT で 70224 T-cycle 周期に同期 |
+
+**最大の原因はキャッシュ無効**だった。ROM は Flash の XIP 配置（`build.rs` の
+`.rodata(Memory::Flash)`）のため、D-cache 無効だと GB の命令フェッチごとに低速な
+FlexSPI アクセスが発生していた。Cortex-M7 はリセット時キャッシュ無効で、bare-metal
+（imxrt-rt + bsp）構成では誰も有効化していなかった。DMA 対象のフレームバッファ FB は
+非キャッシュの DTCM (TCM) にあるため、D-cache 有効化でも DMA コヒーレンシ問題は生じない。
+
+**SPI クロックの制約**: BSP の `set_spi_clock` は分周 `half_div` を下限3でクランプ
+するため SPI = `132MHz/(4+2) ≈ 22MHz` が実効上限で、`board::lpspi(...)` に何 Hz を
+渡しても 22MHz になる。これはハードや配線の限界ではなくライブラリのソフト制限のため、
+LPSPI4 の CCR レジスタ（オフセット 0x40）を直接書き換えて `SCKDIV=2`（33MHz）に設定。
+実機で 33MHz でも表示は乱れないことを確認済み（continuous mode で乱れる場合は 22MHz に戻す）。
+
+**ペーシングの必要性**: teensy ループは従来ペース調整が無く、SPI 転送時間が偶然
+フレーム予算に近かったため概ね正しい速度だった。33MHz 化で転送が予算より大幅に短く
+なり realtime より速く動いてしまうため、DWT で 1 フレーム周期に同期させて固定した。
+
+計測足場（USB シリアルログ・DWT 集計）は切り分け後に撤去済み。詳細なコミット:
+`cache有効化` → `性能計測の追加/撤去` → `SPIクロック33MHz` → `フレームペーシング`。
+
 ---
 
 ## 残タスク
@@ -131,31 +162,44 @@ cargo run -p gb-host -- test_rom.gb
 ```
 teensy/
 ├── Cargo.toml
+├── Makefile                 # build / hex / flash (WSL→Windows teensy_loader 対応)
 ├── .cargo/
 │   └── config.toml          # target = thumbv7em-none-eabihf, runner
-├── memory.x                 # i.MX RT1062 リンカスクリプト
-├── build.rs                 # memory.x を rustc に渡す
+├── build.rs                 # imxrt-rt RuntimeBuilder でリンカスクリプト等を生成
 └── src/
     ├── main.rs              # #![no_std] #![no_main] + エントリポイント
-    ├── display.rs           # ILI9341 ドライバ
-    ├── cartridge.rs         # GPIO カートリッジバス
+    ├── display/
+    │   ├── mod.rs           # DMA 描画ドライバ (DmaDisplay)
+    │   └── panel.rs         # パネル抽象 (PanelController / Ili9341)
+    ├── sdcard.rs            # FlashCart (Flash 埋め込み ROM, RomOnly/MBC1)
+    ├── cartridge.rs         # GpioCart (実 GB カートリッジ GPIO バス)
     ├── audio.rs             # I2S オーディオ (スタブ)
     └── input.rs             # GPIO ボタン入力 (スタブ)
 ```
 
-`cargo build -p gb-teensy --target thumbv7em-none-eabihf` でビルド可能。
+**ビルドシステム**: 手書きの `memory.x` は廃止。`build.rs` が `imxrt-rt` の
+`RuntimeBuilder` で FCB/IVT/FlexRAM 設定とリンカスクリプト（`gb-teensy-link.x`）を
+自動生成する。FlexRAM 512KB は ITCM 192KB（`.text`）/ DTCM 320KB（スタック・静的変数・
+フレームバッファ）に配分。ROM は `.rodata(Memory::Flash)` で Flash 上に XIP 配置。
+
+ビルド・書き込みは `Makefile` 経由（`make build` / `make hex` / `make flash`）。
+WSL からは `make flash TEENSY_CLI=.../teensy_loader_cli.exe` で Windows 側に書き込む。
 
 ---
 
-### C. ILI9341 Display 実装 ✅ 完了
+### C. ILI9341 Display 実装 ✅ 完了（DMA 描画 + パネル抽象）
 
-`teensy/src/display.rs` に `Ili9341Display<SPI, DC, RST>` として実装済み。
+`teensy/src/display/mod.rs` に `DmaDisplay<P, SPI, DC, RST>`、`display/panel.rs` に
+パネル抽象 `PanelController`（実装 `Ili9341`）として実装済み。
 
 **実装内容:**
-- `embedded-hal` 0.2 SPI トレイトで手書き ILI9341 ドライバ
-- パレットインデックス(0–3) → RGB565 変換テーブル（DMG 風グリーンパレット）
+- 描画は **LPSPI4 + eDMA** によるバックグラウンド転送（CPU を専有しない）
+- **ダブルバッファ**（FB×2）。`draw()` は前回 DMA 完了待ち → 変換 → 次 DMA 起動
+- continuous mode で 2px を 1 u32 にパックし 11520 ワードを転送（CCR/TCR/FCR/DER を直書き）
+- パレットインデックス(0–3) → RGB565 変換（DMG 風グリーンパレット）
 - 160×144 を 240×320 の中央に配置（ウィンドウ転送）
-- 46080 バイトのフレームバッファを DTCM 上に確保
+- フレームバッファ FB（46080 バイト×2）を DTCM 上に確保（DMA からアクセス可能・非キャッシュ）
+- SPI クロックは CCR 直書きで 33MHz（セクション 7 参照）。転送 約11ms でフレーム描画の裏に隠れる
 
 **確定ピン配:**
 
@@ -171,9 +215,15 @@ teensy/
 
 ---
 
-### D. GPIO CartridgeBus 実装 ✅ 完了（実機調整残）
+### D. CartridgeBus 実装 ✅ 完了（実機調整残）
 
-`teensy/src/cartridge.rs` に `GpioCart` として実装済み。
+ROM 供給は 2 経路あり、**現在 `main.rs` は `FlashCart`（Flash 埋め込み）を使用中**。
+
+- **`teensy/src/sdcard.rs` `FlashCart`**（デフォルト）: `include_bytes!("../../roms/game.gb")`
+  でビルド時に Flash へ埋め込む。RomOnly(32KB) と MBC1(最大 2MB ROM + 32KB RAM、バンク
+  切替・外部 RAM 対応) をサポート。SDカード方式は将来実装予定（`embedded-sdmmc` 0.7）。
+- **`teensy/src/cartridge.rs` `GpioCart`**: 実 GB カートリッジを GPIO バスで読む実装（下記）。
+  現在 `main.rs` からは未使用（実機配線・A8–A15 確認待ち）。
 
 **確定ピン配:**
 
@@ -260,9 +310,12 @@ host/src/
 └── renderer.rs     TerminalRenderer（未使用・保留）
 
 teensy/src/
-├── main.rs         エントリポイント / ピン初期化 / GameBoy ループ
-├── display.rs      Ili9341Display<SPI,DC,RST> — impl Display ✅
-├── cartridge.rs    GpioCart — impl CartridgeBus ✅ (A8-A15 TODO)
+├── main.rs         エントリ / cache有効化 / SPI 33MHz / FlashCart / ペーシングループ
+├── display/
+│   ├── mod.rs      DmaDisplay<P,SPI,DC,RST> — impl Display ✅ (eDMA + ダブルバッファ)
+│   └── panel.rs    PanelController / Ili9341 (パネル抽象)
+├── sdcard.rs       FlashCart — impl CartridgeBus ✅ (Flash 埋め込み, RomOnly/MBC1)
+├── cartridge.rs    GpioCart — impl CartridgeBus ✅ (実カート用 / A8-A15 TODO・未使用)
 ├── audio.rs        PcmAudio — impl AudioSink (スタブ / SAI 未実装)
 └── input.rs        GpioInput — impl InputSource (スタブ / ピン未割当)
 ```
@@ -272,9 +325,10 @@ teensy/src/
 | # | タスク | 状態 |
 |---|---|---|
 | A | `cargo run -p gb-host` で実機 PC 動作確認 | 未着手 |
-| B | `teensy/` クレートの骨組み | ✅ 完了 |
-| C | ILI9341 Display 実装 | ✅ 完了 |
-| D | GPIO CartridgeBus 実装 | ✅ 完了（A8-A15 ピン確認待ち） |
+| B | `teensy/` クレートの骨組み（imxrt-rt 化済み） | ✅ 完了 |
+| C | ILI9341 Display 実装（DMA 描画 + パネル抽象） | ✅ 完了 |
+| D | CartridgeBus 実装（FlashCart 使用中 / GpioCart 実カート用） | ✅ 完了（A8-A15 ピン確認待ち） |
 | E | I2S AudioSink 実装 | スタブのみ |
 | F | GPIO ボタン入力実装 | スタブのみ |
 | G | CI / その他 | 未着手 |
+| H | Teensy 実機の性能最適化（cache / SPI 33MHz / ペーシング） | ✅ 完了（59.7fps 固定） |
