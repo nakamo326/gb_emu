@@ -72,8 +72,33 @@ fn main() -> ! {
             sck: pins.p13,
             pcs0: pins.p10,
         },
-        24_000_000, // 描画高速化のため 24MHz。配線が崩れる場合は下げる
+        // BSP の set_spi_clock は分周 half_div を下限3でクランプ → SCKDIV=4 固定。
+        // SPI = 132MHz/(4+2) = 約22MHz が実効上限で、ここに何を渡しても 22MHz になる。
+        // 実クロックは直後の CCR 直書きで設定するため、この値は形式的なもの。
+        24_000_000,
     );
+
+    // BSP のクランプを外し、CCR を直接書き換えて SPI を高速化する。
+    // SCKDIV=2 → 132MHz/(2+2) = 33MHz。これで全画面 DMA 転送が約11msに収まり、
+    // フレーム予算(16.7ms)の裏に完全に隠れる (実機計測で wait=0 を確認)。
+    // CCR は LPSPI 無効時のみ書けるため MEN をトグルする。DBT/PCSSCK/SCKPCS は
+    // half_div=2 相当の 1 (クランプが無ければ hal が算出したはずの値と同一)。
+    // continuous mode で SCK が乱れて表示が崩れる場合は SCKDIV を 4 (22MHz) に戻す。
+    unsafe {
+        const LPSPI4_BASE: u32 = 0x403A_0000;
+        let cr = (LPSPI4_BASE + 0x10) as *mut u32; // 制御レジスタ
+        let ccr = (LPSPI4_BASE + 0x40) as *mut u32; // クロック構成レジスタ
+        const SCKDIV: u32 = 2; // 132/(2+2)=33MHz。22MHz に戻すなら 4
+        const DLY: u32 = 1; // DBT/PCSSCK/SCKPCS (= half_div-1)
+
+        let men = core::ptr::read_volatile(cr) & 1;
+        core::ptr::write_volatile(cr, core::ptr::read_volatile(cr) & !1); // MEN=0
+        core::ptr::write_volatile(
+            ccr,
+            (DLY << 24) | (DLY << 16) | (DLY << 8) | SCKDIV, // SCKPCS|PCSSCK|DBT|SCKDIV
+        );
+        core::ptr::write_volatile(cr, core::ptr::read_volatile(cr) | men); // MEN 復帰
+    }
 
     // バックライト有効化
     let mut bl = gpio2.output(pins.p7);
