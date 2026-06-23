@@ -17,6 +17,11 @@ teensy4-panic   = "0.2"
 # teensy4-bsp 0.5 / imxrt-hal 0.5 は embedded-hal 0.2 と 1.0 の両方を実装しているため
 # 既存の 0.2 トレイト利用コードはそのまま動作する。
 embedded-hal    = "0.2"
+# --- 計測用 (USB シリアルログ) ---
+# imxrt-log の usbd バックエンドで DWT サイクル計測値を PC へ出力する。
+# lpuart/defmt は不要なので default-features を切り、log + usbd のみ有効化。
+imxrt-log       = { version = "0.1", default-features = false, features = ["log", "usbd"] }
+log             = "0.4"
 # SDカード対応: imxrt-hal 0.5 は embedded-hal 1.0 も実装するため、
 # embedded-sdmmc 0.7 (embedded-hal 1.0 必須) と組み合わせ可能になった。
 # 対応方法は docs/teensy_setup_guide.md を参照。

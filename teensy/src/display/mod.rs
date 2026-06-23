@@ -1,8 +1,17 @@
 pub mod panel;
 
 use core::marker::PhantomData;
+use core::sync::atomic::{AtomicU32, Ordering};
+
+use cortex_m::peripheral::DWT;
 
 use gb_core::platform::Display;
+
+/// 直近の draw() における DMA 完了待ち (busy-wait) の所要サイクル数。
+/// 描画律速かどうかの判定に使う (計測用)。
+pub static WAIT_CYCLES: AtomicU32 = AtomicU32::new(0);
+/// 直近の draw() 全体 (wait + fill_buffer + set_window + start_dma) の所要サイクル数。
+pub static DRAW_CYCLES: AtomicU32 = AtomicU32::new(0);
 
 use embedded_hal::blocking::spi::Write as SpiWrite;
 use embedded_hal::digital::v2::OutputPin;
@@ -252,8 +261,11 @@ where
     RST: OutputPin,
 {
     fn draw(&mut self, pixels: &[u8]) {
+        let t0 = DWT::cycle_count();
+
         // 1. 前回の DMA 完了を待つ
         self.wait_dma_complete();
+        let t1 = DWT::cycle_count();
 
         // 2. バックバッファにピクセルデータを変換
         let buf = unsafe { &mut FB[self.back] };
@@ -268,5 +280,10 @@ where
         // 5. バッファを入れ替えて DMA 開始
         self.back = 1 - self.back;
         self.start_dma();
+
+        let t2 = DWT::cycle_count();
+        // 計測値を記録 (DMA待ち / draw全体)
+        WAIT_CYCLES.store(t1.wrapping_sub(t0), Ordering::Relaxed);
+        DRAW_CYCLES.store(t2.wrapping_sub(t0), Ordering::Relaxed);
     }
 }
