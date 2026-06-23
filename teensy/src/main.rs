@@ -50,6 +50,16 @@ fn main() -> ! {
         ..
     } = board::t41(board::instances());
 
+    let mut cp = cortex_m::Peripherals::take().unwrap();
+
+    // ------- L1 キャッシュ有効化 -------
+    // Cortex-M7 はリセット時キャッシュ無効。ROM は Flash の XIP 配置 (build.rs) のため、
+    // D-cache が無いと GB の命令フェッチごとに低速な FlexSPI アクセスが発生し激遅になる。
+    // DMA 対象のフレームバッファ FB は DTCM (非キャッシュの TCM) にあるため、
+    // D-cache を有効化しても DMA とのコヒーレンシ問題は生じない。
+    cp.SCB.enable_icache();
+    cp.SCB.enable_dcache(&mut cp.CPUID);
+
     // ------- ROM (Flash 埋め込み) -------
     let cart = FlashCart::new(ROM);
 
