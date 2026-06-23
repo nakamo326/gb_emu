@@ -47,7 +47,6 @@ fn main() -> ! {
         mut gpio2,
         mut dma,
         pins,
-        usb,
         ..
     } = board::t41(board::instances());
 
@@ -60,13 +59,6 @@ fn main() -> ! {
     // D-cache を有効化しても DMA とのコヒーレンシ問題は生じない。
     cp.SCB.enable_icache();
     cp.SCB.enable_dcache(&mut cp.CPUID);
-
-    // ------- 計測: DWT サイクルカウンタ有効化 -------
-    cp.DCB.enable_trace();
-    cp.DWT.enable_cycle_counter();
-
-    // ------- 計測: USB シリアルログ (割り込み無効 → 手動ポーリング) -------
-    let mut poller = imxrt_log::log::usbd(usb, imxrt_log::Interrupts::Disabled).unwrap();
 
     // ------- ROM (Flash 埋め込み) -------
     let cart = FlashCart::new(ROM);
@@ -102,64 +94,7 @@ fn main() -> ! {
     let mmu = Mmu::new(bootrom, cart);
     let mut gb = GameBoy::new(mmu, display, NullAudio, input);
 
-    // ------- メインループ (計測付き) -------
-    use cortex_m::peripheral::DWT;
-    use display::{DRAW_CYCLES, WAIT_CYCLES};
-    use core::sync::atomic::Ordering;
-
-    // 600MHz → 1µs あたりのサイクル数
-    const CYC_PER_US: u64 = (board::ARM_FREQUENCY / 1_000_000) as u64;
-    const REPORT_FRAMES: u32 = 60;
-
-    let mut last = DWT::cycle_count();
-    let mut sum_period: u64 = 0;
-    let mut sum_draw: u64 = 0;
-    let mut sum_wait: u64 = 0;
-    let mut frames: u32 = 0;
-    let mut step_ctr: u32 = 0;
-
     loop {
-        let r = gb.step();
-
-        // USB ログを定期的に駆動 (割り込み無効のため手動ポーリング)。
-        // 毎 M-cycle だと計測を歪めるので 256 サイクルごとに間引く。
-        step_ctr = step_ctr.wrapping_add(1);
-        if step_ctr & 0xFF == 0 {
-            poller.poll();
-        }
-
-        if r.frame_ready {
-            let now = DWT::cycle_count();
-            sum_period += now.wrapping_sub(last) as u64;
-            sum_draw += DRAW_CYCLES.load(Ordering::Relaxed) as u64;
-            sum_wait += WAIT_CYCLES.load(Ordering::Relaxed) as u64;
-            last = now;
-            frames += 1;
-
-            if frames >= REPORT_FRAMES {
-                let n = frames as u64;
-                let period_us = sum_period / n / CYC_PER_US;
-                let draw_us = sum_draw / n / CYC_PER_US;
-                let wait_us = sum_wait / n / CYC_PER_US;
-                let emu_us = (sum_period - sum_draw) / n / CYC_PER_US;
-                // fps = ARM_FREQUENCY / 平均周期。小数1桁まで出す。
-                let fps_x10 = board::ARM_FREQUENCY as u64 * 10 * n / sum_period;
-
-                log::info!(
-                    "fps={}.{} period={}us emu={}us draw={}us wait={}us",
-                    fps_x10 / 10,
-                    fps_x10 % 10,
-                    period_us,
-                    emu_us,
-                    draw_us,
-                    wait_us,
-                );
-
-                frames = 0;
-                sum_period = 0;
-                sum_draw = 0;
-                sum_wait = 0;
-            }
-        }
+        gb.step();
     }
 }
