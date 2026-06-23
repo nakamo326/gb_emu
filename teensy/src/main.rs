@@ -60,6 +60,10 @@ fn main() -> ! {
     cp.SCB.enable_icache();
     cp.SCB.enable_dcache(&mut cp.CPUID);
 
+    // ------- DWT サイクルカウンタ有効化 (フレームペーシングのタイマー) -------
+    cp.DCB.enable_trace();
+    cp.DWT.enable_cycle_counter();
+
     // ------- ROM (Flash 埋め込み) -------
     let cart = FlashCart::new(ROM);
 
@@ -119,7 +123,27 @@ fn main() -> ! {
     let mmu = Mmu::new(bootrom, cart);
     let mut gb = GameBoy::new(mmu, display, NullAudio, input);
 
+    // ------- メインループ (フレームペーシング) -------
+    // GB 1 フレーム = 70224 T-cycle。ARM クロック換算のフレーム周期 (約16.742ms) ごとに
+    // ループを同期させ、emu/描画がどれだけ速くても realtime (59.7fps) に固定する。
+    // SPI 33MHz 化で work(emu+描画) が予算を大きく下回り、約11msの余裕が生まれている。
+    use cortex_m::peripheral::DWT;
+    const FRAME_CYCLES: u32 = (board::ARM_FREQUENCY as u64 * 70224 / 4_194_304) as u32;
+    let mut next_deadline = DWT::cycle_count().wrapping_add(FRAME_CYCLES);
+
     loop {
-        gb.step();
+        let r = gb.step();
+
+        if r.frame_ready {
+            let now = DWT::cycle_count();
+            if (now.wrapping_sub(next_deadline) as i32) >= 0 {
+                // 締切超過 (処理が予算を上回った) → 同期しなおしてバースト追い上げを防ぐ
+                next_deadline = now.wrapping_add(FRAME_CYCLES);
+            } else {
+                // 締切まで待機して realtime に同期
+                while (DWT::cycle_count().wrapping_sub(next_deadline) as i32) < 0 {}
+                next_deadline = next_deadline.wrapping_add(FRAME_CYCLES);
+            }
+        }
     }
 }
