@@ -31,7 +31,7 @@ use sdcard::FlashCart;
 ///
 /// 実機検証で判明した配線の重要事項 (詳細は docs/teensy_setup_guide.md):
 ///   - バックライト(LED/BL)は GPIO では電流不足で駆動不可 → 3.3V に直結する。
-///     下の p7 set_high は無害だが実際のバックライト点灯には寄与しない。
+///     よって pin 7 は GPIO として空いており、今後ボタン入力 (input.rs) に転用予定。
 ///   - 単一 SPI デバイスなら CS→GND, RESET→3.3V 固定が最も確実 (その場合 p10/p8 は未使用)。
 ///
 /// ROM は Flash に埋め込み (include_bytes!)。
@@ -104,10 +104,8 @@ fn main() -> ! {
         core::ptr::write_volatile(cr, core::ptr::read_volatile(cr) | men); // MEN 復帰
     }
 
-    // バックライト有効化
-    let mut bl = gpio2.output(pins.p7);
-    let _ = embedded_hal::digital::v2::OutputPin::set_high(&mut bl);
-
+    // バックライト(BL)は 3.3V 直結のため GPIO 駆動は不要 (上のコメント参照)。
+    // pin 7 はボタン入力 (input.rs) で使う予定のため、ここでは確保しない。
     let dc  = gpio2.output(pins.p9);
     let rst = gpio2.output(pins.p8);
     let dma_channel = dma[0].take().unwrap();
