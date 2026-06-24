@@ -24,10 +24,10 @@ const RAMWR: u8 = 0x2C;
 const SPI_MAX_CHUNK: usize = 512;
 
 const PALETTE: [u16; 4] = [
-    rgb565(155, 188, 15),
-    rgb565(139, 172, 15),
-    rgb565(48, 98, 48),
-    rgb565(15, 56, 15),
+    rgb565(0xE0, 0xF8, 0xD0),
+    rgb565(0x88, 0xC0, 0x70),
+    rgb565(0x34, 0x68, 0x56),
+    rgb565(0x0E, 0x18, 0x20),
 ];
 
 const fn rgb565(r: u8, g: u8, b: u8) -> u16 {
