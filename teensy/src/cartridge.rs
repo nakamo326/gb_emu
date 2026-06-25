@@ -1,6 +1,6 @@
 /// 実 GB ROM カートリッジ GPIO バスドライバ。
 ///
-/// # ピン割り当て (Teensy 4.1, 要実機確認)
+/// # ピン割り当て (Teensy 4.1, 確定)
 ///
 /// | 信号    | Teensy ピン | GPIO ポート / ビット | 備考             |
 /// |--------|------------|-------------------|-----------------|
@@ -12,15 +12,39 @@
 /// | D5     | 16         | GPIO1[23]         | GPIO_AD_B1_07   |
 /// | D6     | 22         | GPIO1[24]         | GPIO_AD_B1_08   |
 /// | D7     | 23         | GPIO1[25]         | GPIO_AD_B1_09   |
-/// | A0–A7  | 19,18,38,39,26,27,0,1 | GPIO1[16-17,28-31,2-3] ※ 非連続 |
-/// | A8–A15 | 拡張パッド  | GPIO3/4 (TODO)    |                 |
+/// | A0     | 19         | GPIO1[16]         | GPIO_AD_B1_00   |
+/// | A1     | 18         | GPIO1[17]         | GPIO_AD_B1_01   |
+/// | A2     | 38         | GPIO1[28]         | GPIO_AD_B1_12   |
+/// | A3     | 39         | GPIO1[29]         | GPIO_AD_B1_13   |
+/// | A4     | 24         | GPIO1[12]         | GPIO_AD_B0_12   |
+/// | A5     | 25         | GPIO1[13]         | GPIO_AD_B0_13   |
+/// | A6     | 0          | GPIO1[3]          | GPIO_AD_B0_03   |
+/// | A7     | 1          | GPIO1[2]          | GPIO_AD_B0_02   |
+/// | A8     | 20         | GPIO1[26]         | GPIO_AD_B1_10   |
+/// | A9     | 21         | GPIO1[27]         | GPIO_AD_B1_11   |
+/// | A10    | 2          | GPIO4             | GPIO_EMC_04     |
+/// | A11    | 3          | GPIO4             | GPIO_EMC_05     |
+/// | A12    | 4          | GPIO4             | GPIO_EMC_06     |
+/// | A13    | 5          | GPIO4             | GPIO_EMC_08     |
+/// | A14    | 6          | GPIO2[10]         | GPIO_B0_10      |
 /// | /RD    | 33         | GPIO4[7]          | GPIO_EMC_07     |
 /// | /WR    | 34         | GPIO2[28]         | GPIO_B1_12 (t41)|
+/// | /CS    | 35         | GPIO2[29]         | GPIO_B1_13 (t41)|
 ///
-/// # 注意
+/// # アドレス出力の注意
+///
+/// - A0-A9 は全て GPIO1 に載るが、ビットは非連続 (bit 2,3,12,13,16,17,26,27,28,29)。
+///   1 回の DR 書き込みでまとめて出すには各ビットへ散らす (scatter) 処理が必要。
+/// - A10-A14 は GPIO4/GPIO2 に分散するため別途セットする。
+/// - A15 は不使用: ROM 域 (0x0000-0x7FFF) では常に 0、外部 RAM (0xA000-0xBFFF) は
+///   /CS で選択する (GB カート実機と同じ)。read/write 時に対象域に応じて /RD/-/WR/-/CS
+///   を使い分けること。
+///
+/// # 配線の注意
 ///
 /// - GB カートリッジは DMG・GBC ともに 5V 系（3.3V に変わるのは GBA から）。
 ///   Teensy 4.1 は 3.3V のため、74AHCT245 等のレベル変換が必要。
+/// - /RESET は 3.3V 固定、位相クロック(CLK)/AUDIO_IN は未接続でよい。
 /// - IOMUXC は事前に `gpio_port.output(pin)` / `.input(pin)` で GPIO モードに設定すること。
 use gb_core::platform::CartridgeBus;
 use teensy4_bsp as bsp;
@@ -31,14 +55,19 @@ use cortex_m::asm;
 const DATA_SHIFT: u32 = 18;
 const DATA_MASK: u32 = 0xFF << DATA_SHIFT;
 
-// TODO: A0-A15 のビットマスクは実際のピン配置に応じて調整すること
-// 現在は GPIO1 ビット 0-15 を仮定した直接マッピング（要変更）
+// TODO: アドレス出力を確定ピン配へ実装すること (上のピン表参照)。
+//   - A0-A9 は GPIO1 の非連続ビット {2,3,12,13,16,17,26,27,28,29} に散らす (scatter)。
+//   - A10-A14 は GPIO4/GPIO2 (pin 2,3,4,5,6) に別途セットする。
+//   - A15 は不使用。下の ADDR_MASK は旧仮実装 (GPIO1 bit 0-15 直接) のままなので要置換。
 const ADDR_MASK: u32 = 0x0000_FFFF;
 
 /// /RD = GPIO4 bit 7 (pin 33 = GPIO_EMC_07)
 const N_RD_OFFSET: u32 = 7;
 /// /WR = GPIO2 bit 28 (pin 34 t41 = GPIO_B1_12 → GPIO2[28])
 const N_WR_OFFSET: u32 = 28;
+/// /CS = GPIO2 bit 29 (pin 35 t41 = GPIO_B1_13 → GPIO2[29])。外部 RAM (0xA000-0xBFFF) で使用。
+/// TODO: /CS の Output を保持し、RAM 域アクセス時にアサートする実装を追加すること。
+const _N_CS_OFFSET: u32 = 29;
 
 /// ROM アクセスタイム待ち ≥ 150 ns @ 600 MHz ≈ 90 cycles
 const ACCESS_DELAY: u32 = 90;

@@ -8,7 +8,9 @@
 /// | SAI1_TX_BCLK | 26         | GPIO_AD_B1_14 | PCM5102 BCK        |
 /// | SAI1_TX_SYNC | 27         | GPIO_AD_B1_15 | PCM5102 LRCK       |
 ///
-/// NOTE: pin 7 を SAI に使うため BL (バックライト) は pin 6 に変更すること。
+/// NOTE: BL (バックライト) は 3.3V 直結のため GPIO 不使用。よって pin 7 は
+///       SAI1_TX_DATA に確定 (競合なし)。PCM5102 は MCLK 不要なので 3 本で足りる。
+///       pin 26/27 は cart アドレス線とは競合しない (A4/A5 は pin 24/25 に配置)。
 ///
 /// # SAI/I2S クロック設定
 ///

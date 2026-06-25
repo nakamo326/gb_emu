@@ -24,15 +24,30 @@ use display::panel::Ili9341;
 use input::GpioInput;
 use sdcard::FlashCart;
 
-/// Teensy 4.1 ピン割り当て:
+/// Teensy 4.1 全ピン割り当て (確定):
 ///
-/// ILI9341 ディスプレイ (LPSPI4):
-///   MOSI=11, MISO=12, SCK=13, CS=10(PCS0), DC=9, RST=8
+/// ┌ Display (LPSPI4) ──────────────────────────────────────────────┐
+/// │ MOSI=11  MISO=12  SCK=13  CS=10(PCS0)  DC=9  RST=8  BL=3.3V直結  │
+/// ├ Cartridge (GpioCart) ──────────────────────────────────────────┤
+/// │ D0-D7 = 14,15,40,41,17,16,22,23     (GPIO1[18-25] 連続・高速読出) │
+/// │ A0-A9 = 19,18,38,39,24,25,0,1,20,21 (全て GPIO1。bit は非連続)    │
+/// │ A10-A14 = 2,3,4,5,6                  (GPIO4/GPIO2)               │
+/// │ /RD=33  /WR=34  /CS=35                                          │
+/// │   ※ A15 は不使用 (ROM 域は常に 0、外部RAM は /CS で選択)         │
+/// ├ Audio (SAI1 TX / PCM5102) ─────────────────────────────────────┤
+/// │ TX_DATA=7   TX_BCLK=26   TX_SYNC=27                             │
+/// ├ Buttons (2x4 マトリクス, GB 準拠) ──────────────────────────────┤
+/// │ SEL_DIR=28  SEL_ACT=29   IN0-IN3 = 30,31,32,36                  │
+/// │   SEL_DIR=LOW → 右/左/上/下,  SEL_ACT=LOW → A/B/Select/Start     │
+/// ├ 予備 ──────────────────────────────────────────────────────────┤
+/// │ pin 37                                                         │
+/// └────────────────────────────────────────────────────────────────┘
 ///
 /// 実機検証で判明した配線の重要事項 (詳細は docs/teensy_setup_guide.md):
 ///   - バックライト(LED/BL)は GPIO では電流不足で駆動不可 → 3.3V に直結する。
-///     よって pin 7 は GPIO として空いており、今後ボタン入力 (input.rs) に転用予定。
+///     これにより空いた pin 7 は SAI1_TX_DATA (audio.rs) に確定。
 ///   - 単一 SPI デバイスなら CS→GND, RESET→3.3V 固定が最も確実 (その場合 p10/p8 は未使用)。
+///   - GB カートリッジは 5V 系 → D/A/制御線は 74AHCT245 等でレベル変換が必要。
 ///
 /// ROM は Flash に埋め込み (include_bytes!)。
 /// SDカード対応は docs/teensy_setup_guide.md を参照。
@@ -105,7 +120,7 @@ fn main() -> ! {
     }
 
     // バックライト(BL)は 3.3V 直結のため GPIO 駆動は不要 (上のコメント参照)。
-    // pin 7 はボタン入力 (input.rs) で使う予定のため、ここでは確保しない。
+    // 空いた pin 7 は SAI1_TX_DATA (audio.rs) に割当済みのため、ここでは扱わない。
     let dc  = gpio2.output(pins.p9);
     let rst = gpio2.output(pins.p8);
     let dma_channel = dma[0].take().unwrap();
