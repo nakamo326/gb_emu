@@ -270,10 +270,12 @@ PCM5102 は MCLK 不要のため 3 本で足りる。
 
 ---
 
-### F. GPIO ボタン入力（優先度: 低）— スタブのみ
+### F. GPIO ボタン入力 ✅ 完了（2x4 マトリクス）
 
-`teensy/src/input.rs` に `GpioInput` スタブを追加済み。
-`InputSource::poll()` は現在 `ButtonState::default()`（全ボタン非押下）を返す。
+`teensy/src/input.rs` の `GpioInput` を実装済み。`poll()` で SEL_DIR/SEL_ACT の
+2 列を走査し、IN0–IN3 を読んで `ButtonState` に変換する。入力ピンは内部 22k
+プルアップ + ヒステリシスを設定（active-low）。配線・実装手順は
+[docs/teensy_button_wiring.md](docs/teensy_button_wiring.md) を参照。
 
 **確定ピン配（2x4 マトリクス・GB 準拠）:**
 
@@ -288,9 +290,7 @@ PCM5102 は MCLK 不要のため 3 本で足りる。
 
 IN0–IN3 は内部プルアップ + active-low。各ボタンに直列ダイオードでゴースト防止。
 
-**次のステップ:**
-- SEL_DIR/SEL_ACT を出力、IN0–IN3 を入力（プルアップ）に設定
-- `poll()` で 2 列を走査し PSR を読んで `ButtonState` に変換
+**残: 実機での配線と動作確認**（ソフトは実装完了）。
 
 ---
 
@@ -346,6 +346,6 @@ teensy/src/
 | C | ILI9341 Display 実装（DMA 描画 + パネル抽象） | ✅ 完了 |
 | D | CartridgeBus 実装（FlashCart 使用中 / GpioCart 実カート用） | ✅ 完了（ピン確定 / scatter実装待ち） |
 | E | I2S AudioSink 実装 | スタブのみ |
-| F | GPIO ボタン入力実装 | スタブのみ |
+| F | GPIO ボタン入力実装（2x4 マトリクス） | ✅ 完了（実機配線待ち） |
 | G | CI / その他 | 未着手 |
 | H | Teensy 実機の性能最適化（cache / SPI 33MHz / ペーシング） | ✅ 完了（59.7fps 固定） |

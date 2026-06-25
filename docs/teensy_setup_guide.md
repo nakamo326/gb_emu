@@ -239,7 +239,7 @@ teensy_loader_cli --mcu=TEENSY41 -w -v \
 | MBC1 (最大 512KB) | ✅ 対応 | |
 | BootROM | 無効化済み | `Bootrom::disabled()` で Nintendo ロゴをスキップ |
 | サウンド (I2S) | ❌ 未実装 | 無音で動作 |
-| ボタン入力 | ❌ 未実装 | 全ボタン非押下状態 (デモのみ) |
+| ボタン入力 (2x4 マトリクス) | ✅ 実装済み | 配線は [teensy_button_wiring.md](teensy_button_wiring.md) 参照 |
 | MBC3/MBC5 | ❌ 未対応 | 対象 ROM は起動しない |
 
 ---
@@ -271,10 +271,6 @@ GND                  →    GND
 ```
 
 LPSPI4 の SPI バスをディスプレイと共有し、CS ピンを分けることで 1 つの SPI バスで両デバイスを制御できます。
-
-### ボタン入力 (`teensy/src/input.rs`)
-
-`GpioInput` の `poll()` を実装してゲームを操作できるようにする。空きピンを 8 個用意してボタンを接続する。
 
 ### サウンド (`teensy/src/audio.rs`)
 
