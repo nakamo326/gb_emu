@@ -60,6 +60,8 @@ fn main() -> ! {
     let board::Resources {
         lpspi4,
         mut gpio2,
+        mut gpio3,
+        mut gpio4,
         mut dma,
         pins,
         ..
@@ -132,7 +134,18 @@ fn main() -> ! {
     // 著作権注意 — 配布不可
     let bootrom = Bootrom::disabled();
 
-    let input = GpioInput::new();
+    // ボタン入力 (2x4 マトリクス)。ピンの GPIO ポートは型で固定されている。
+    let input = GpioInput::new(
+        &mut gpio2,
+        &mut gpio3,
+        &mut gpio4,
+        pins.p28,
+        pins.p29,
+        pins.p30,
+        pins.p31,
+        pins.p32,
+        pins.p36,
+    );
     let mmu = Mmu::new(bootrom, cart);
     let mut gb = GameBoy::new(mmu, display, NullAudio, input);
 
