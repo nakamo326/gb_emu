@@ -27,9 +27,10 @@
 /// | A12    | 4          | GPIO4             | GPIO_EMC_06     |
 /// | A13    | 5          | GPIO4             | GPIO_EMC_08     |
 /// | A14    | 6          | GPIO2[10]         | GPIO_B0_10      |
-/// | /RD    | 33         | GPIO4[7]          | GPIO_EMC_07     |
+/// | /RD    | 33         | GPIO4[7]          | GPIO_EMC_07。74AHCT245 DIR にも直結（双方向バス制御） |
 /// | /WR    | 34         | GPIO2[28]         | GPIO_B1_12 (t41)|
 /// | /CS    | 35         | GPIO2[29]         | GPIO_B1_13 (t41)|
+/// | /RESET | 37         | GPIO2[19]         | GPIO_B1_03 (t41)。電源投入後にリセットパルスを与える |
 ///
 /// # アドレス出力の注意
 ///
@@ -43,8 +44,11 @@
 /// # 配線の注意
 ///
 /// - GB カートリッジは DMG・GBC ともに 5V 系（3.3V に変わるのは GBA から）。
-///   Teensy 4.1 は 3.3V のため、74AHCT245 等のレベル変換が必要。
-/// - /RESET は 3.3V 固定、位相クロック(CLK)/AUDIO_IN は未接続でよい。
+///   Teensy 4.1 は 3.3V のため、74AHCT245 ×4 でレベル変換する。データバスは双方向 245 ×1 を
+///   使い、DIR ピンに /RD を直結して向きを切り替える（詳細: docs/hardware_decisions_levelshift.md）。
+/// - /RESET は pin 37 (GPIO2[19]) から制御する。電源投入後に LOW→HIGH のリセットパルスを与え、
+///   MBC のバンクレジスタを初期化する（3.3V 固定では RomOnly しか安定しない）。
+/// - 位相クロック(CLK)/AUDIO_IN は未接続でよい。
 /// - IOMUXC は事前に `gpio_port.output(pin)` / `.input(pin)` で GPIO モードに設定すること。
 use gb_core::platform::CartridgeBus;
 use teensy4_bsp as bsp;
@@ -59,6 +63,9 @@ const DATA_MASK: u32 = 0xFF << DATA_SHIFT;
 //   - A0-A9 は GPIO1 の非連続ビット {2,3,12,13,16,17,26,27,28,29} に散らす (scatter)。
 //   - A10-A14 は GPIO4/GPIO2 (pin 2,3,4,5,6) に別途セットする。
 //   - A15 は不使用。下の ADDR_MASK は旧仮実装 (GPIO1 bit 0-15 直接) のままなので要置換。
+// TODO: /RESET (pin 37 = GPIO2[19]) の Output を保持し、new() で電源投入後に
+//   LOW→HIGH のリセットパルスを与えること (MBC バンクレジスタ初期化)。
+//     reset_pin.clear(); asm::delay(600_000 /* 1ms @600MHz */); reset_pin.set();
 const ADDR_MASK: u32 = 0x0000_FFFF;
 
 /// /RD = GPIO4 bit 7 (pin 33 = GPIO_EMC_07)
