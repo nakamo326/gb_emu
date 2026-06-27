@@ -35,12 +35,9 @@ use sdcard::FlashCart;
 /// ├ Buttons (2x4 マトリクス, GB 準拠) ──────────────────────────────┤
 /// │ SEL_DIR=28  SEL_ACT=29   IN0-IN3 = 30,31,32,36                  │
 /// │   SEL_DIR=LOW → 右/左/上/下,  SEL_ACT=LOW → A/B/Select/Start     │
-/// │   ※ 上記で Teensy 4.1 の pin 0-41 を全て使用 (空きピンなし)      │
 /// └────────────────────────────────────────────────────────────────┘
 ///
 /// 実機検証で判明した配線の重要事項 (詳細は docs/teensy_setup_guide.md):
-///   - バックライト(LED/BL)は GPIO では電流不足で駆動不可 → 3.3V に直結する。
-///     これにより空いた pin 7 は SAI1_TX_DATA (audio.rs) に確定。
 ///   - 単一 SPI デバイスなら CS→GND, RESET→3.3V 固定が最も確実 (その場合 p10/p8 は未使用)。
 ///   - GB カートリッジは 5V 系 → D/A/制御線は 74AHCT245 等でレベル変換が必要。
 ///
@@ -99,7 +96,6 @@ fn main() -> ! {
     // フレーム予算(16.7ms)の裏に完全に隠れる (実機計測で wait=0 を確認)。
     // CCR は LPSPI 無効時のみ書けるため MEN をトグルする。DBT/PCSSCK/SCKPCS は
     // half_div=2 相当の 1 (クランプが無ければ hal が算出したはずの値と同一)。
-    // continuous mode で SCK が乱れて表示が崩れる場合は SCKDIV を 4 (22MHz) に戻す。
     unsafe {
         const LPSPI4_BASE: u32 = 0x403A_0000;
         let cr = (LPSPI4_BASE + 0x10) as *mut u32; // 制御レジスタ
@@ -116,17 +112,14 @@ fn main() -> ! {
         core::ptr::write_volatile(cr, core::ptr::read_volatile(cr) | men); // MEN 復帰
     }
 
-    // バックライト(BL)は 3.3V 直結のため GPIO 駆動は不要 (上のコメント参照)。
-    // 空いた pin 7 は SAI1_TX_DATA (audio.rs) に割当済みのため、ここでは扱わない。
     let dc = gpio2.output(pins.p9);
     let rst = gpio2.output(pins.p8);
     let dma_channel = dma[0].take().unwrap();
+
     let display = DmaDisplay::<Ili9341, _, _, _>::new(spi, dc, rst, dma_channel);
 
     // ------- GB コア -------
 
-    // BootROM を使う場合: Bootrom::from_bytes(*include_bytes!("../dmg_bootrom.bin"))
-    // 著作権注意 — 配布不可
     let bootrom = Bootrom::disabled();
 
     // ボタン入力 (2x4 マトリクス)。ピンの GPIO ポートは型で固定されている。
@@ -140,7 +133,6 @@ fn main() -> ! {
     // ------- メインループ (フレームペーシング) -------
     // GB 1 フレーム = 70224 T-cycle。ARM クロック換算のフレーム周期 (約16.742ms) ごとに
     // ループを同期させ、emu/描画がどれだけ速くても realtime (59.7fps) に固定する。
-    // SPI 33MHz 化で work(emu+描画) が予算を大きく下回り、約11msの余裕が生まれている。
     use cortex_m::peripheral::DWT;
     const FRAME_CYCLES: u32 = (board::ARM_FREQUENCY as u64 * 70224 / 4_194_304) as u32;
     let mut next_deadline = DWT::cycle_count().wrapping_add(FRAME_CYCLES);
