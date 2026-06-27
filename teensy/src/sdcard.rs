@@ -1,3 +1,5 @@
+use gb_core::platform::CartridgeBus;
+
 /// ROM を CartridgeBus として提供するモジュール。
 ///
 /// # Flash 埋め込み方式 (デフォルト)
@@ -11,7 +13,6 @@
 /// `embedded-sdmmc 0.7` (embedded-hal 1.0 必須) と組み合わせて実装可能。
 /// SPI は `board::lpspi(...)` の戻り値を embedded-hal 1.0 の `SpiDevice` を満たすよう
 /// ラップして渡す。
-use gb_core::platform::CartridgeBus;
 
 // MBC1 の外部 RAM 最大サイズ (4 バンク × 8KB = 32KB)
 const MAX_RAM: usize = 0x8000;
@@ -45,7 +46,11 @@ impl FlashCart {
     }
 
     fn cart_type(&self) -> u8 {
-        if self.rom.len() >= 0x148 { self.rom[0x147] } else { 0x00 }
+        if self.rom.len() >= 0x148 {
+            self.rom[0x147]
+        } else {
+            0x00
+        }
     }
 
     fn is_mbc1(&self) -> bool {
@@ -96,7 +101,9 @@ impl CartridgeBus for FlashCart {
                     if self.rom.len() > 0x80000 {
                         bank |= (self.ram_bank << 5) & 0x60;
                     }
-                    if bank == 0 { bank = 1; }
+                    if bank == 0 {
+                        bank = 1;
+                    }
                     let offset = bank as usize * 0x4000 + (addr as usize - 0x4000);
                     if offset < self.rom.len() {
                         self.rom[offset]
@@ -151,7 +158,9 @@ impl CartridgeBus for FlashCart {
                     let bank = if self.mode { self.ram_bank } else { 0 };
                     let offset = bank as usize * 0x2000 + (addr as usize - 0xA000);
                     if offset < ram_size {
-                        unsafe { CART_RAM[offset] = val; }
+                        unsafe {
+                            CART_RAM[offset] = val;
+                        }
                     }
                 }
             }

@@ -12,15 +12,10 @@ use teensy4_panic as _;
 
 use bsp::board;
 
-use gb_core::{
-    bootrom::Bootrom,
-    gameboy::GameBoy,
-    mmu::Mmu,
-    platform::NullAudio,
-};
+use gb_core::{bootrom::Bootrom, gameboy::GameBoy, mmu::Mmu, platform::NullAudio};
 
-use display::DmaDisplay;
 use display::panel::Ili9341;
+use display::DmaDisplay;
 use input::GpioInput;
 use sdcard::FlashCart;
 
@@ -123,7 +118,7 @@ fn main() -> ! {
 
     // バックライト(BL)は 3.3V 直結のため GPIO 駆動は不要 (上のコメント参照)。
     // 空いた pin 7 は SAI1_TX_DATA (audio.rs) に割当済みのため、ここでは扱わない。
-    let dc  = gpio2.output(pins.p9);
+    let dc = gpio2.output(pins.p9);
     let rst = gpio2.output(pins.p8);
     let dma_channel = dma[0].take().unwrap();
     let display = DmaDisplay::<Ili9341, _, _, _>::new(spi, dc, rst, dma_channel);
@@ -136,14 +131,7 @@ fn main() -> ! {
 
     // ボタン入力 (2x4 マトリクス)。ピンの GPIO ポートは型で固定されている。
     let input = GpioInput::new(
-        &mut gpio2,
-        &mut gpio3,
-        &mut gpio4,
-        pins.p28,
-        pins.p29,
-        pins.p30,
-        pins.p31,
-        pins.p32,
+        &mut gpio2, &mut gpio3, &mut gpio4, pins.p28, pins.p29, pins.p30, pins.p31, pins.p32,
         pins.p36,
     );
     let mmu = Mmu::new(bootrom, cart);

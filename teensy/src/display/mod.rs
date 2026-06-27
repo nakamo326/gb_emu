@@ -7,10 +7,10 @@ use gb_core::platform::Display;
 use embedded_hal::blocking::spi::Write as SpiWrite;
 use embedded_hal::digital::v2::OutputPin;
 
-use teensy4_bsp as bsp;
 use bsp::hal;
 use hal::dma::channel::{self, Channel, Configuration};
 use panel::PanelController;
+use teensy4_bsp as bsp;
 
 const GB_W: usize = 160;
 const GB_H: usize = 144;
@@ -207,7 +207,7 @@ where
             // FRAMESZ=31, RXMSK=1(bit 19), CONT=1(bit 21), PCS=0, WIDTH=0, LSBF=0
             let tcr_val: u32 = 31 // FRAMESZ = 31 (32 bits)
                 | (1 << 19)       // RXMSK
-                | (1 << 21);      // CONT
+                | (1 << 21); // CONT
             core::ptr::write_volatile(LPSPI4_TCR, tcr_val);
         }
 

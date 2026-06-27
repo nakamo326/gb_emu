@@ -1,3 +1,8 @@
+use bsp::hal::gpio::{Input, Output, Port};
+use cortex_m::asm;
+use gb_core::platform::CartridgeBus;
+use teensy4_bsp as bsp;
+
 /// 実 GB ROM カートリッジ GPIO バスドライバ。
 ///
 /// # ピン割り当て (Teensy 4.1, 確定)
@@ -50,10 +55,6 @@
 ///   MBC のバンクレジスタを初期化する（3.3V 固定では RomOnly しか安定しない）。
 /// - 位相クロック(CLK)/AUDIO_IN は未接続でよい。
 /// - IOMUXC は事前に `gpio_port.output(pin)` / `.input(pin)` で GPIO モードに設定すること。
-use gb_core::platform::CartridgeBus;
-use teensy4_bsp as bsp;
-use bsp::hal::gpio::{Input, Output, Port};
-use cortex_m::asm;
 
 /// D0-D7 は GPIO1 ビット 18-25 に連続配置
 const DATA_SHIFT: u32 = 18;
@@ -98,11 +99,7 @@ impl GpioCart {
     /// 2. データバスピン (D0-D7)、アドレスバスピン (A0-A15)、制御ピン (/RD, /WR) に対して
     ///    `gpio_port.output(pin)` を呼び IOMUXC を GPIO モードに設定
     /// 3. `gpio4` および `gpio2` は本関数への移動後に別のコードから使用しないこと
-    pub unsafe fn new(
-        mut data_port: Port<1>,
-        mut gpio4: Port<4>,
-        mut gpio2: Port<2>,
-    ) -> Self {
+    pub unsafe fn new(mut data_port: Port<1>, mut gpio4: Port<4>, mut gpio2: Port<2>) -> Self {
         // アドレスバス A0-A15 を出力に設定 (GPIO1 bit 0-15)
         for bit in 0..16u32 {
             let _ = Output::<()>::without_pin(&mut data_port, bit);
@@ -123,7 +120,11 @@ impl GpioCart {
 
         // gpio4, gpio2 はここで drop。Output<()> は &'static RegisterBlock を保持するため
         // Port が drop された後も使用可能（ハードウェアアドレスは常に有効）。
-        Self { data_port, n_rd, n_wr }
+        Self {
+            data_port,
+            n_rd,
+            n_wr,
+        }
     }
 }
 
@@ -133,8 +134,8 @@ impl CartridgeBus for GpioCart {
         let gpio1 = unsafe { bsp::ral::gpio::GPIO1::instance() };
 
         // アドレス出力
-        bsp::ral::modify_reg!(bsp::ral::gpio, gpio1, DR,
-            |dr| (dr & !ADDR_MASK) | (addr as u32 & ADDR_MASK));
+        bsp::ral::modify_reg!(bsp::ral::gpio, gpio1, DR, |dr| (dr & !ADDR_MASK)
+            | (addr as u32 & ADDR_MASK));
 
         // /RD をアサート → 待機 → データ読み取り → デアサート
         self.n_rd.clear();
@@ -148,15 +149,15 @@ impl CartridgeBus for GpioCart {
         let gpio1 = unsafe { bsp::ral::gpio::GPIO1::instance() };
 
         // アドレス出力
-        bsp::ral::modify_reg!(bsp::ral::gpio, gpio1, DR,
-            |dr| (dr & !ADDR_MASK) | (addr as u32 & ADDR_MASK));
+        bsp::ral::modify_reg!(bsp::ral::gpio, gpio1, DR, |dr| (dr & !ADDR_MASK)
+            | (addr as u32 & ADDR_MASK));
 
         // データバスを出力に切り替え → 書き込み
         for bit in DATA_SHIFT..DATA_SHIFT + 8 {
             let _ = Output::<()>::without_pin(&mut self.data_port, bit);
         }
-        bsp::ral::modify_reg!(bsp::ral::gpio, gpio1, DR,
-            |dr| (dr & !DATA_MASK) | ((val as u32) << DATA_SHIFT));
+        bsp::ral::modify_reg!(bsp::ral::gpio, gpio1, DR, |dr| (dr & !DATA_MASK)
+            | ((val as u32) << DATA_SHIFT));
 
         // /WR アサート → 待機 → デアサート
         self.n_wr.clear();
