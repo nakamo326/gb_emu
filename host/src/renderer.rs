@@ -18,17 +18,16 @@ impl TerminalRenderer {
         Self { width, height }
     }
 
-    // ピクセル値をASCII文字に変換する
     fn pixel_to_ascii(&self, pixel: u8) -> char {
+        // GB パレットインデックスは 0 が最も明るい。濃い文字ほど大きい値に対応させる。
         match pixel {
-            0 => ' ', // 一番暗い（白っぽい）
-            1 => '░', // 薄いグレー
-            2 => '▒', // 中くらいのグレー
-            _ => '█', // 一番濃い（黒っぽい）
+            0 => ' ',
+            1 => '░',
+            2 => '▒',
+            _ => '█',
         }
     }
 
-    // ターミナルをクリアする
     fn clear_screen(&self) {
         print!("\x1B[2J\x1B[H");
     }
@@ -38,7 +37,6 @@ impl Renderer for TerminalRenderer {
     fn draw(&mut self, pixel_buffer: &[u8]) {
         self.clear_screen();
 
-        // ピクセルバッファを1行ずつ処理
         for y in 0..self.height {
             for x in 0..self.width {
                 let index = y * self.width + x;
@@ -46,13 +44,12 @@ impl Renderer for TerminalRenderer {
                     let ascii_char = self.pixel_to_ascii(pixel_buffer[index]);
                     print!("{}", ascii_char);
                 } else {
-                    print!(" "); // バッファが足りない場合は空白
+                    print!(" ");
                 }
             }
-            println!(); // 改行
+            println!();
         }
 
-        // バッファをフラッシュして即座に表示
         use std::io::{self, Write};
         io::stdout().flush().unwrap();
     }

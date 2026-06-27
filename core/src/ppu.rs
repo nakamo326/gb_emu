@@ -149,25 +149,20 @@ impl Ppu {
     }
 
     fn get_pixel_from_tile(&self, tile_idx: usize, row: u8, col: u8) -> u8 {
-        // 8x8タイルの1ピクセルを取得する
-        // 一行2byte
+        // GB タイルは 2bpp: 1 行 = 2 バイト、low/high の同ビットを組んで 1 ピクセル(0-3)。
+        // bit7 が左端なので列 col のビット位置は 7-col。
         let r = (row * 2) as usize;
-        //
         let c = (7 - col) as usize;
-
-        // 0x8000からのオフセットを計算
         let tile_addr = tile_idx << 4;
 
-        // 0x1FFFはVRAMのアドレス範囲
         let low = self.vram[(tile_addr | r) & 0x1FFF];
         let high = self.vram[(tile_addr | (r + 1)) & 0x1FFF];
 
-        let pixel = ((low >> c) & 1) | (((high >> c) & 1) << 1);
-        pixel
+        ((low >> c) & 1) | (((high >> c) & 1) << 1)
     }
 
     fn get_tile_idx_from_tile_map(&self, tile_map: bool, row: u8, col: u8) -> usize {
-        // tile_mapは２つある FIXME: bool???
+        // tile_map: false=0x9800, true=0x9C00 の 2 つのマップ領域を選ぶ(VRAM offset)。
         let tile_map_addr = if tile_map { 0x1C00 } else { 0x1800 };
 
         let ret = self.vram[tile_map_addr | (((row as usize) << 5) + col as usize)];
@@ -326,7 +321,6 @@ impl Ppu {
             return false;
         }
 
-        // vsyncであるかを示す変数
         let mut is_vsync = false;
 
         match self.mode {
