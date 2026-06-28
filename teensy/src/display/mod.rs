@@ -1,9 +1,11 @@
+pub mod font;
 pub mod panel;
 
 use core::marker::PhantomData;
 
 use gb_core::platform::Display;
 
+use cortex_m::peripheral::DWT;
 use embedded_hal::blocking::spi::Write as SpiWrite;
 use embedded_hal::digital::v2::OutputPin;
 
@@ -22,6 +24,16 @@ const RASET: u8 = 0x2B;
 const RAMWR: u8 = 0x2C;
 
 const SPI_MAX_CHUNK: usize = 512;
+
+// --- 情報オーバーレイ (FPS など) ---
+const OVERLAY_SCALE: u16 = 2; // フォント拡大率 (5x7 → 10x14)
+const OVERLAY_X: u16 = 4; // GB 領域上の余白バンド内の描画位置
+const OVERLAY_Y: u16 = 12;
+const OVERLAY_FG: u16 = rgb565(0xFF, 0xFF, 0xFF);
+const OVERLAY_BG: u16 = rgb565(0x00, 0x00, 0x00);
+// 1 グリフ行ぶんの一時バッファ最大バイト数。
+// セル幅 (font::WIDTH + 1) * scale * 2byte。scale<=4 で 48byte に収まる。
+const GLYPH_ROW_BYTES: usize = (font::WIDTH + 1) * 4 * 2;
 
 const PALETTE: [u16; 4] = [
     rgb565(0xE0, 0xF8, 0xD0),
@@ -46,6 +58,11 @@ pub struct DmaDisplay<P, SPI, DC, RST> {
     channel: Channel,
     back: usize,
     in_flight: bool,
+    // --- FPS 計測 ---
+    frame_count: u32,      // 計測ウィンドウ内の描画フレーム数
+    last_fps_cycle: u32,   // 直近のウィンドウ開始時の DWT サイクル
+    fps_tenths: u32,       // 最新の確定 FPS 値 (×10, 0.1fps 単位)
+    fps_dirty: bool,       // 表示更新が必要か (値が変わった時のみ true)
     _panel: PhantomData<P>,
 }
 
@@ -64,6 +81,10 @@ where
             channel,
             back: 0,
             in_flight: false,
+            frame_count: 0,
+            last_fps_cycle: DWT::cycle_count(),
+            fps_tenths: 0,
+            fps_dirty: false,
             _panel: PhantomData,
         };
         d.channel.reset();
@@ -123,17 +144,122 @@ where
         }
     }
 
-    fn set_window(&mut self) {
-        let x0 = (P::WIDTH - GB_W as u16) / 2 + P::COL_OFFSET;
-        let y0 = (P::HEIGHT - GB_H as u16) / 2 + P::ROW_OFFSET;
-        let x1 = x0 + GB_W as u16 - 1;
-        let y1 = y0 + GB_H as u16 - 1;
+    /// 描画ウィンドウ (CASET/RASET) を設定し RAMWR を発行する。
+    /// `x`/`y` はパネルオフセットを含まない論理座標。
+    fn set_rect(&mut self, x: u16, y: u16, w: u16, h: u16) {
+        let x0 = x + P::COL_OFFSET;
+        let y0 = y + P::ROW_OFFSET;
+        let x1 = x0 + w - 1;
+        let y1 = y0 + h - 1;
 
         self.cmd(CASET);
         self.data_pio(&[(x0 >> 8) as u8, x0 as u8, (x1 >> 8) as u8, x1 as u8]);
         self.cmd(RASET);
         self.data_pio(&[(y0 >> 8) as u8, y0 as u8, (y1 >> 8) as u8, y1 as u8]);
         self.cmd(RAMWR);
+    }
+
+    fn set_window(&mut self) {
+        let x0 = (P::WIDTH - GB_W as u16) / 2;
+        let y0 = (P::HEIGHT - GB_H as u16) / 2;
+        self.set_rect(x0, y0, GB_W as u16, GB_H as u16);
+    }
+
+    /// 1 文字を PIO (ブロッキング) で描画する。GB の DMA が走っていない
+    /// 区間でのみ呼ぶこと (SPI バス競合を避けるため)。
+    fn draw_char(&mut self, x: u16, y: u16, ch: u8, scale: u16) {
+        let g = font::glyph(ch);
+        let cols = font::WIDTH as u16 + 1; // グリフ 5 列 + 右スペース 1 列
+        let rows = font::HEIGHT as u16 + 1; // グリフ 7 行 + 下スペース 1 行
+        self.set_rect(x, y, cols * scale, rows * scale);
+        let _ = self.dc.set_high();
+
+        let fg = OVERLAY_FG.to_be_bytes();
+        let bg = OVERLAY_BG.to_be_bytes();
+        let mut row_buf = [0u8; GLYPH_ROW_BYTES];
+
+        for ry in 0..rows {
+            let bits = if ry < font::HEIGHT as u16 {
+                g[ry as usize]
+            } else {
+                0
+            };
+            // この行 (拡大前 1 ライン) を RGB565 で展開
+            let mut n = 0;
+            for cx in 0..cols {
+                let on = cx < font::WIDTH as u16
+                    && (bits >> (font::WIDTH as u16 - 1 - cx)) & 1 != 0;
+                let px = if on { fg } else { bg };
+                for _ in 0..scale {
+                    row_buf[n] = px[0];
+                    row_buf[n + 1] = px[1];
+                    n += 2;
+                }
+            }
+            // 縦方向の拡大ぶん同じ行を繰り返し送出
+            for _ in 0..scale {
+                let _ = self.spi.write(&row_buf[..n]);
+            }
+        }
+    }
+
+    fn draw_text(&mut self, x: u16, y: u16, text: &[u8], scale: u16) {
+        let cell_w = (font::WIDTH as u16 + 1) * scale;
+        let mut cx = x;
+        for &ch in text {
+            self.draw_char(cx, y, ch, scale);
+            cx += cell_w;
+        }
+    }
+
+    /// フレーム毎に呼び出して FPS を更新する。1 秒経過ごとに値を確定し、
+    /// 変化があれば `fps_dirty` を立てる。
+    fn update_fps(&mut self) {
+        self.frame_count += 1;
+        let now = DWT::cycle_count();
+        let elapsed = now.wrapping_sub(self.last_fps_cycle);
+        if elapsed >= bsp::board::ARM_FREQUENCY {
+            // fps = frames / (elapsed / ARM_FREQ)。0.1fps 単位に丸めるため ×10。
+            // 600MHz × 60frame × 10 は u32 を溢れるので u64 で計算する。
+            let tenths = (self.frame_count as u64 * bsp::board::ARM_FREQUENCY as u64 * 10
+                / elapsed as u64) as u32;
+            if tenths != self.fps_tenths {
+                self.fps_tenths = tenths;
+                self.fps_dirty = true;
+            }
+            self.frame_count = 0;
+            self.last_fps_cycle = now;
+        }
+    }
+
+    /// 情報オーバーレイ (現状 FPS のみ) を余白バンドに描画する。
+    fn render_overlay(&mut self) {
+        let mut text = [b' '; 10];
+        text[0] = b'F';
+        text[1] = b'P';
+        text[2] = b'S';
+        text[3] = b':';
+        let mut len = 4;
+
+        // 整数部 (0.1fps 単位の値を 10 で割る)。最大 999.9fps 想定。
+        let int = (self.fps_tenths / 10).min(999);
+        if int >= 100 {
+            text[len] = b'0' + (int / 100 % 10) as u8;
+            len += 1;
+        }
+        if int >= 10 {
+            text[len] = b'0' + (int / 10 % 10) as u8;
+            len += 1;
+        }
+        text[len] = b'0' + (int % 10) as u8;
+        len += 1;
+        // 小数第1位
+        text[len] = b'.';
+        len += 1;
+        text[len] = b'0' + (self.fps_tenths % 10) as u8;
+        len += 1;
+
+        self.draw_text(OVERLAY_X, OVERLAY_Y, &text[..len], OVERLAY_SCALE);
     }
 
     fn wait_dma_complete(&mut self) {
@@ -254,6 +380,14 @@ where
     fn draw(&mut self, pixels: &[u8]) {
         // 1. 前回の DMA 完了を待つ
         self.wait_dma_complete();
+
+        // 1.5. FPS を更新。値が変わった時 (≒毎秒1回) だけ余白に PIO 描画する。
+        //      ここは GB の DMA が走っていない区間なので SPI バスは空いている。
+        self.update_fps();
+        if self.fps_dirty {
+            self.render_overlay();
+            self.fps_dirty = false;
+        }
 
         // 2. バックバッファにピクセルデータを変換
         let buf = unsafe { &mut FB[self.back] };
