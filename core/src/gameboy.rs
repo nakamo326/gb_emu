@@ -42,6 +42,11 @@ impl<C: CartridgeBus, D: Display, A: AudioSink, I: InputSource> GameBoy<C, D, A,
         &self.mmu
     }
 
+    /// display への可変参照（プラットフォーム側の統計表示・計測に使用）。
+    pub fn display_mut(&mut self) -> &mut D {
+        &mut self.display
+    }
+
     /// 1 M-cycle 進める。フレーム完成時に display へ draw し、入力をポーリングする。
     pub fn step(&mut self) -> StepResult {
         let mut result = StepResult::default();

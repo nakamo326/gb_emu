@@ -63,6 +63,15 @@ pub struct DmaDisplay<P, SPI, DC, RST> {
     last_fps_cycle: u32,   // 直近のウィンドウ開始時の DWT サイクル
     fps_tenths: u32,       // 最新の確定 FPS 値 (×10, 0.1fps 単位)
     fps_dirty: bool,       // 表示更新が必要か (値が変わった時のみ true)
+    // --- フレーム負荷計測 (スパイク/コマ落ち診断用) ---
+    work_max: u32,         // 現ウィンドウ内の最悪フレーム処理サイクル
+    work_sum: u64,         // 同・合計 (平均算出用)
+    work_samples: u32,     // 同・サンプル数 (フレーム数)
+    drop_count: u32,       // 同・予算超過したフレーム数
+    budget: u32,           // 直近の 1 フレーム予算サイクル (record_work から受領)
+    peak_pct: u32,         // 確定値: 最悪負荷 (予算比 %)
+    avg_pct: u32,          // 確定値: 平均負荷 (予算比 %)
+    drops: u32,            // 確定値: 直近 1 秒のコマ落ち回数
     _panel: PhantomData<P>,
 }
 
@@ -85,6 +94,14 @@ where
             last_fps_cycle: DWT::cycle_count(),
             fps_tenths: 0,
             fps_dirty: false,
+            work_max: 0,
+            work_sum: 0,
+            work_samples: 0,
+            drop_count: 0,
+            budget: 0,
+            peak_pct: 0,
+            avg_pct: 0,
+            drops: 0,
             _panel: PhantomData,
         };
         d.channel.reset();
@@ -212,8 +229,22 @@ where
         }
     }
 
-    /// フレーム毎に呼び出して FPS を更新する。1 秒経過ごとに値を確定し、
-    /// 変化があれば `fps_dirty` を立てる。
+    /// 1 フレーム分の実処理サイクル (step 群 + draw、ビジーウェイトを除く) を記録する。
+    /// `budget` は 1 フレームの予算サイクル。main ループから毎フレーム呼ぶ。
+    pub fn record_work(&mut self, cycles: u32, budget: u32) {
+        self.budget = budget;
+        if cycles > self.work_max {
+            self.work_max = cycles;
+        }
+        self.work_sum += cycles as u64;
+        self.work_samples += 1;
+        if cycles > budget {
+            self.drop_count += 1;
+        }
+    }
+
+    /// フレーム毎に呼び出して FPS とフレーム負荷統計を更新する。
+    /// 1 秒経過ごとに値を確定し、変化があれば `fps_dirty` を立てる。
     fn update_fps(&mut self) {
         self.frame_count += 1;
         let now = DWT::cycle_count();
@@ -229,6 +260,34 @@ where
             }
             self.frame_count = 0;
             self.last_fps_cycle = now;
+
+            // フレーム負荷統計を確定 (予算比 %)。
+            let budget = self.budget.max(1) as u64;
+            let peak = (self.work_max as u64 * 100 / budget) as u32;
+            let avg = if self.work_samples > 0 {
+                (self.work_sum * 100 / (self.work_samples as u64 * budget)) as u32
+            } else {
+                0
+            };
+            if peak != self.peak_pct || avg != self.avg_pct || self.drop_count != self.drops {
+                self.peak_pct = peak;
+                self.avg_pct = avg;
+                self.drops = self.drop_count;
+                self.fps_dirty = true;
+            }
+            log::info!(
+                "FPS:{}.{} peak:{}% avg:{}% drops:{}",
+                self.fps_tenths / 10,
+                self.fps_tenths % 10,
+                self.peak_pct,
+                self.avg_pct,
+                self.drops,
+            );
+
+            self.work_max = 0;
+            self.work_sum = 0;
+            self.work_samples = 0;
+            self.drop_count = 0;
         }
     }
 
@@ -260,6 +319,46 @@ where
         len += 1;
 
         self.draw_text(OVERLAY_X, OVERLAY_Y, &text[..len], OVERLAY_SCALE);
+
+        // 2 行目: フレーム負荷統計  "P<peak>% A<avg>% D<drops>"
+        //   P = 最悪負荷 (予算比 %)、A = 平均負荷、D = 直近 1 秒のコマ落ち回数
+        let mut s = [b' '; 20];
+        let mut n = 0;
+        s[n] = b'P';
+        n += 1;
+        n = Self::put_num(&mut s, n, self.peak_pct.min(999));
+        s[n] = b'%';
+        n += 1;
+        s[n] = b' ';
+        n += 1;
+        s[n] = b'A';
+        n += 1;
+        n = Self::put_num(&mut s, n, self.avg_pct.min(999));
+        s[n] = b'%';
+        n += 1;
+        s[n] = b' ';
+        n += 1;
+        s[n] = b'D';
+        n += 1;
+        n = Self::put_num(&mut s, n, self.drops.min(999));
+
+        let line2_y = OVERLAY_Y + (font::HEIGHT as u16 + 1) * OVERLAY_SCALE;
+        self.draw_text(OVERLAY_X, line2_y, &s[..n], OVERLAY_SCALE);
+    }
+
+    /// 10 進数 (0..=999) を buf[pos..] に書き、次の書き込み位置を返す。
+    fn put_num(buf: &mut [u8], mut pos: usize, v: u32) -> usize {
+        if v >= 100 {
+            buf[pos] = b'0' + ((v / 100) % 10) as u8;
+            pos += 1;
+        }
+        if v >= 10 {
+            buf[pos] = b'0' + ((v / 10) % 10) as u8;
+            pos += 1;
+        }
+        buf[pos] = b'0' + (v % 10) as u8;
+        pos += 1;
+        pos
     }
 
     fn wait_dma_complete(&mut self) {
@@ -385,7 +484,11 @@ where
         //      ここは GB の DMA が走っていない区間なので SPI バスは空いている。
         self.update_fps();
         if self.fps_dirty {
+            let ov_start = DWT::cycle_count();
             self.render_overlay();
+            let ov_us = DWT::cycle_count().wrapping_sub(ov_start)
+                / (bsp::board::ARM_FREQUENCY / 1_000_000);
+            log::info!("overlay: {}us", ov_us);
             self.fps_dirty = false;
         }
 

@@ -13,7 +13,9 @@ gb-core         = { path = "../core" }
 cortex-m        = { version = "0.7", features = ["critical-section-single-core"] }
 # rt フィーチャで imxrt-rt ベースのランタイム (FCB/IVT/FlexRAM 設定/リンカ生成) を利用
 teensy4-bsp     = { version = "0.5", features = ["rt"] }
-teensy4-panic   = "0.2"
+teensy4-panic   = { version = "0.2", features = ["log"] }
+imxrt-log       = { version = "0.1", features = ["usbd", "log"], default-features = false }
+log             = "0.4"
 # teensy4-bsp 0.5 / imxrt-hal 0.5 は embedded-hal 0.2 と 1.0 の両方を実装しているため
 # 既存の 0.2 トレイト利用コードはそのまま動作する。
 embedded-hal    = "0.2"

@@ -11,8 +11,24 @@ use teensy4_bsp as bsp;
 use teensy4_panic as _;
 
 use bsp::board;
+#[allow(unused_imports)]
+use bsp::interrupt;
 
 use gb_core::{bootrom::Bootrom, gameboy::GameBoy, mmu::Mmu, platform::NullAudio};
+
+// --- USB シリアルログ ---
+struct UsbPollerCell(core::cell::UnsafeCell<Option<imxrt_log::Poller>>);
+unsafe impl Sync for UsbPollerCell {}
+static USB_POLLER: UsbPollerCell = UsbPollerCell(core::cell::UnsafeCell::new(None));
+
+#[bsp::rt::interrupt]
+fn USB_OTG1() {
+    unsafe {
+        if let Some(poller) = (*USB_POLLER.0.get()).as_mut() {
+            poller.poll();
+        }
+    }
+}
 
 use display::panel::St7789;
 use display::DmaDisplay;
@@ -50,6 +66,7 @@ static ROM: &[u8] = include_bytes!("../../roms/game.gb");
 #[bsp::rt::entry]
 fn main() -> ! {
     let board::Resources {
+        usb,
         lpspi4,
         mut gpio2,
         mut gpio3,
@@ -72,6 +89,13 @@ fn main() -> ! {
     // ------- DWT サイクルカウンタ有効化 (フレームペーシングのタイマー) -------
     cp.DCB.enable_trace();
     cp.DWT.enable_cycle_counter();
+
+    // ------- USB シリアルログ (imxrt-log) -------
+    let poller = imxrt_log::log::usbd(usb, imxrt_log::Interrupts::Enabled).unwrap();
+    unsafe {
+        *USB_POLLER.0.get() = Some(poller);
+        cortex_m::peripheral::NVIC::unmask(bsp::interrupt::USB_OTG1);
+    }
 
     // ------- ROM (Flash 埋め込み) -------
     let cart = FlashCart::new(ROM);
@@ -136,12 +160,19 @@ fn main() -> ! {
     use cortex_m::peripheral::DWT;
     const FRAME_CYCLES: u32 = (board::ARM_FREQUENCY as u64 * 70224 / 4_194_304) as u32;
     let mut next_deadline = DWT::cycle_count().wrapping_add(FRAME_CYCLES);
+    // フレーム処理開始時刻 (ビジーウェイト解除直後)。実処理サイクル計測の基準。
+    let mut frame_start = DWT::cycle_count();
 
     loop {
         let r = gb.step();
 
         if r.frame_ready {
             let now = DWT::cycle_count();
+            // このフレームの実処理サイクル (step 群 + draw、待機を含まない) を記録。
+            // オーバーレイの2行目に負荷% とコマ落ち回数として表示される。
+            let work = now.wrapping_sub(frame_start);
+            gb.display_mut().record_work(work, FRAME_CYCLES);
+
             if (now.wrapping_sub(next_deadline) as i32) >= 0 {
                 // 締切超過 (処理が予算を上回った) → 同期しなおしてバースト追い上げを防ぐ
                 next_deadline = now.wrapping_add(FRAME_CYCLES);
@@ -150,6 +181,8 @@ fn main() -> ! {
                 while (DWT::cycle_count().wrapping_sub(next_deadline) as i32) < 0 {}
                 next_deadline = next_deadline.wrapping_add(FRAME_CYCLES);
             }
+            // 待機を終えた地点を次フレームの処理開始基準にする。
+            frame_start = DWT::cycle_count();
         }
     }
 }
