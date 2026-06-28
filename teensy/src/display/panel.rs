@@ -123,7 +123,7 @@ pub struct St7789;
 
 impl PanelController for St7789 {
     const WIDTH: u16 = 240;
-    const HEIGHT: u16 = 320;
+    const HEIGHT: u16 = 240;
     const COL_OFFSET: u16 = 0;
     const ROW_OFFSET: u16 = 0;
 

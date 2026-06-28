@@ -14,7 +14,7 @@ use bsp::board;
 
 use gb_core::{bootrom::Bootrom, gameboy::GameBoy, mmu::Mmu, platform::NullAudio};
 
-use display::panel::Ili9341;
+use display::panel::St7789;
 use display::DmaDisplay;
 use input::GpioInput;
 use sdcard::FlashCart;
@@ -116,7 +116,7 @@ fn main() -> ! {
     let rst = gpio2.output(pins.p8);
     let dma_channel = dma[0].take().unwrap();
 
-    let display = DmaDisplay::<Ili9341, _, _, _>::new(spi, dc, rst, dma_channel);
+    let display = DmaDisplay::<St7789, _, _, _>::new(spi, dc, rst, dma_channel);
 
     // ------- GB コア -------
 
