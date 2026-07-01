@@ -1,9 +1,10 @@
 //! プラットフォーム抽象トレイト群（表示・音声・カートリッジバス）。
 //! 入力は [`crate::input::InputSource`] を使う。
 
-/// 160x144 のパレットインデックス(0–3)バッファを表示する。
+/// 160x144 の RGB555 ピクセルバッファを表示する。
+/// bits 0-4=R, bits 5-9=G, bits 10-14=B（GBC ネイティブ形式）
 pub trait Display {
-    fn draw(&mut self, buffer: &[u8]);
+    fn draw(&mut self, buffer: &[u16]);
 }
 
 /// ステレオ f32 サンプルを出力先へ渡す。
@@ -25,7 +26,7 @@ pub trait CartridgeBus {
 pub struct NullDisplay;
 
 impl Display for NullDisplay {
-    fn draw(&mut self, _: &[u8]) {}
+    fn draw(&mut self, _: &[u16]) {}
 }
 
 /// 音声を破棄する no-op 実装。

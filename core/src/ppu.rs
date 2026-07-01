@@ -24,6 +24,19 @@ const LYC_EQ_LY: u8 = 1 << 2;
 pub const LCD_WIDTH: usize = 160;
 pub const LCD_HEIGHT: usize = 144;
 
+/// RGB555 形式: bits 0-4=R, bits 5-9=G, bits 10-14=B（GBC ネイティブ形式）
+const fn rgb555(r: u8, g: u8, b: u8) -> u16 {
+    (r as u16 >> 3) | ((g as u16 >> 3) << 5) | ((b as u16 >> 3) << 10)
+}
+
+/// DMG グリーン 4 色パレット（RGB555）
+const DMG_PALETTE: [u16; 4] = [
+    rgb555(0xE0, 0xF8, 0xD0),
+    rgb555(0x88, 0xC0, 0x70),
+    rgb555(0x34, 0x68, 0x56),
+    rgb555(0x0E, 0x18, 0x20),
+];
+
 struct SpriteData {
     x: u8,
     y: u8,
@@ -50,7 +63,7 @@ pub struct Ppu {
     wx: u8,
     vram: [u8; 0x2000],
     oam: [u8; 0xA0],
-    buffer: [u8; LCD_WIDTH * LCD_HEIGHT],
+    buffer: [u16; LCD_WIDTH * LCD_HEIGHT],
     /// BGP 適用前のピクセル値（スプライト優先度判定用）
     bg_pixel_buffer: [u8; LCD_WIDTH * LCD_HEIGHT],
     /// OAMScan で収集したスプライト（最大10）
@@ -201,8 +214,8 @@ impl Ppu {
             let buf_idx = LCD_WIDTH * self.ly as usize + i;
             self.bg_pixel_buffer[buf_idx] = pixel;
 
-            let palette_idx = (self.bgp >> (pixel << 1)) & 0b11;
-            self.buffer[buf_idx] = palette_idx;
+            let color_idx = (self.bgp >> (pixel << 1)) & 0b11;
+            self.buffer[buf_idx] = DMG_PALETTE[color_idx as usize];
         }
     }
 
@@ -272,8 +285,8 @@ impl Ppu {
                 if bg_priority && self.bg_pixel_buffer[buf_idx] != 0 {
                     continue;
                 }
-                let palette_idx = (palette >> (pixel << 1)) & 0b11;
-                self.buffer[buf_idx] = palette_idx;
+                let color_idx = (palette >> (pixel << 1)) & 0b11;
+                self.buffer[buf_idx] = DMG_PALETTE[color_idx as usize];
             }
         }
     }
@@ -300,8 +313,8 @@ impl Ppu {
             let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col);
             let buf_idx = LCD_WIDTH * self.ly as usize + i;
             self.bg_pixel_buffer[buf_idx] = pixel;
-            let palette_idx = (self.bgp >> (pixel << 1)) & 0b11;
-            self.buffer[buf_idx] = palette_idx;
+            let color_idx = (self.bgp >> (pixel << 1)) & 0b11;
+            self.buffer[buf_idx] = DMG_PALETTE[color_idx as usize];
         }
         self.window_line_counter += 1;
     }
@@ -387,7 +400,7 @@ impl Ppu {
         is_vsync
     }
 
-    pub fn pixel_buffer(&self) -> &[u8] {
+    pub fn pixel_buffer(&self) -> &[u16] {
         &self.buffer
     }
 }

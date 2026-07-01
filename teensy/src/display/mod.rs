@@ -35,15 +35,19 @@ const OVERLAY_BG: u16 = rgb565(0x00, 0x00, 0x00);
 // セル幅 (font::WIDTH + 1) * scale * 2byte。scale<=4 で 48byte に収まる。
 const GLYPH_ROW_BYTES: usize = (font::WIDTH + 1) * 4 * 2;
 
-const PALETTE: [u16; 4] = [
-    rgb565(0xE0, 0xF8, 0xD0),
-    rgb565(0x88, 0xC0, 0x70),
-    rgb565(0x34, 0x68, 0x56),
-    rgb565(0x0E, 0x18, 0x20),
-];
-
 const fn rgb565(r: u8, g: u8, b: u8) -> u16 {
     ((r as u16 & 0xF8) << 8) | ((g as u16 & 0xFC) << 3) | ((b as u16) >> 3)
+}
+
+/// RGB555 (bits 0-4=R, 5-9=G, 10-14=B) → RGB565 変換
+#[inline(always)]
+const fn rgb555_to_rgb565(px: u16) -> u16 {
+    let r5 = px & 0x1F;
+    let g5 = (px >> 5) & 0x1F;
+    let b5 = (px >> 10) & 0x1F;
+    // G を 5bit→6bit に拡張（MSB を LSB に複製）
+    let g6 = (g5 << 1) | (g5 >> 4);
+    (r5 << 11) | (g6 << 5) | b5
 }
 
 // LPSPI4 TX の DMA ソース番号 (i.MX RT1060)
@@ -372,16 +376,16 @@ where
         self.in_flight = false;
     }
 
-    fn fill_buffer(buf: &mut [u32; BUF_U32], pixels: &[u8]) {
+    fn fill_buffer(buf: &mut [u32; BUF_U32], pixels: &[u16]) {
         let len = pixels.len().min(PIXEL_COUNT);
         let pairs = len / 2;
         for i in 0..pairs {
-            let c0 = PALETTE[(pixels[i * 2] & 3) as usize];
-            let c1 = PALETTE[(pixels[i * 2 + 1] & 3) as usize];
+            let c0 = rgb555_to_rgb565(pixels[i * 2]);
+            let c1 = rgb555_to_rgb565(pixels[i * 2 + 1]);
             buf[i] = (c0 as u32) << 16 | c1 as u32;
         }
         if len & 1 != 0 {
-            let c = PALETTE[(pixels[len - 1] & 3) as usize];
+            let c = rgb555_to_rgb565(pixels[len - 1]);
             buf[pairs] = (c as u32) << 16;
         }
     }
@@ -476,7 +480,7 @@ where
     DC: OutputPin,
     RST: OutputPin,
 {
-    fn draw(&mut self, pixels: &[u8]) {
+    fn draw(&mut self, pixels: &[u16]) {
         // 1. 前回の DMA 完了を待つ
         self.wait_dma_complete();
 

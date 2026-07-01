@@ -72,17 +72,15 @@ pub fn create_sdl_backends() -> (SdlDisplay, SdlAudio, SdlInput) {
 }
 
 impl Display for SdlDisplay {
-    fn draw(&mut self, buffer: &[u8]) {
+    fn draw(&mut self, buffer: &[u16]) {
+        // RGB555 (bits 0-4=R, 5-9=G, 10-14=B) → RGB24
         let rgb_buffer: Vec<u8> = buffer
             .iter()
-            .flat_map(|&palette_idx| {
-                match palette_idx {
-                    0 => [0xE0u8, 0xF8, 0xD0],
-                    1 => [0x88, 0xC0, 0x70],
-                    2 => [0x34, 0x68, 0x56],
-                    _ => [0x0E, 0x18, 0x20],
-                }
-                .into_iter()
+            .flat_map(|&px| {
+                let r = ((px & 0x1F) as u8) << 3;
+                let g = (((px >> 5) & 0x1F) as u8) << 3;
+                let b = (((px >> 10) & 0x1F) as u8) << 3;
+                [r, g, b]
             })
             .collect();
 
