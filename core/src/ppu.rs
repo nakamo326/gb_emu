@@ -260,15 +260,10 @@ impl Ppu {
 
 
     fn render_bg(&mut self) {
-        // CGB: LCDC bit0=0 は "BG/Window master disable" → 画面を白で塗り透明扱い
-        if self.lcdc & BG_WINDOW_ENABLE == 0 {
-            if self.cgb_mode {
-                let base = LCD_WIDTH * self.ly as usize;
-                for i in 0..LCD_WIDTH {
-                    self.bg_pixel_buffer[base + i] = 0;
-                    self.buffer[base + i] = 0x7FFF;
-                }
-            }
+        // DMG のみ: LCDC bit0=0 で BG 無効（白画面）。
+        // CGB では bit0=0 は "BG master priority 無効" であり BG は普通に描画する。
+        // スプライトとの優先度は render_sprites 側で bit0 を見て制御する。
+        if self.lcdc & BG_WINDOW_ENABLE == 0 && !self.cgb_mode {
             return;
         }
         let y = self.ly.wrapping_add(self.scy);
@@ -441,7 +436,12 @@ impl Ppu {
     }
 
     fn render_window(&mut self) {
-        if self.lcdc & WINDOW_ENABLE == 0 || self.lcdc & BG_WINDOW_ENABLE == 0 {
+        // DMG のみ: BG_WINDOW_ENABLE(bit0)=0 でウィンドウも無効。
+        // CGB では bit0=0 でもウィンドウは描画される（スプライト優先度のみ変わる）。
+        if self.lcdc & WINDOW_ENABLE == 0 {
+            return;
+        }
+        if self.lcdc & BG_WINDOW_ENABLE == 0 && !self.cgb_mode {
             return;
         }
         if self.ly < self.wy {
