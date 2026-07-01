@@ -165,7 +165,8 @@ impl<C: CartridgeBus> Mmu<C> {
             0xFF04..=0xFF07 => self.timer.read(addr),
             0xFF0F => self.if_ | 0xE0, // 上位3bitは常に1
             0xFF10..=0xFF3F => self.apu.read(addr),
-            0xFF40..=0xFF4B => self.ppu.read(addr),
+            0xFF40..=0xFF4B | 0xFF4F | 0xFF68..=0xFF6C => self.ppu.read(addr),
+            0xFF70 => self.wram.read_svbk(),
             0xC000..=0xFDFF => self.wram.read(addr),
             0xFF50 => 0xFF,
             0xFF80..=0xFFFE => self.hram.read(addr),
@@ -203,7 +204,8 @@ impl<C: CartridgeBus> Mmu<C> {
                     self.ppu.write(0xFE00 + i, byte);
                 }
             }
-            0xFF40..=0xFF4B => self.ppu.write(addr, val),
+            0xFF40..=0xFF4B | 0xFF4F | 0xFF68..=0xFF6C => self.ppu.write(addr, val),
+            0xFF70 => self.wram.write_svbk(val),
             0xC000..=0xFDFF => self.wram.write(addr, val),
             0xFF50 => self.bootrom.write(addr, val),
             0xFF80..=0xFFFE => self.hram.write(addr, val),

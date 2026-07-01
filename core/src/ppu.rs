@@ -61,7 +61,10 @@ pub struct Ppu {
     obp1: u8,
     wy: u8,
     wx: u8,
-    vram: [u8; 0x2000],
+    /// VRAM: バンク 0 (0x8000-0x9FFF) + バンク 1 (CGB 専用)
+    vram: [[u8; 0x2000]; 2],
+    /// VBK (0xFF4F): 現在の VRAM バンク番号 (0 or 1)
+    vbk: u8,
     oam: [u8; 0xA0],
     buffer: [u16; LCD_WIDTH * LCD_HEIGHT],
     /// BGP 適用前のピクセル値（スプライト優先度判定用）
@@ -75,6 +78,16 @@ pub struct Ppu {
     pub vblank_irq: bool,
     /// STAT 割り込み要求フラグ
     pub stat_irq: bool,
+    /// CGB BG カラーパレット RAM (8 パレット × 4 色 × 2 バイト = 64 バイト)
+    bg_palette_ram: [u8; 64],
+    /// BCPS (0xFF68): BG パレット仕様レジスタ（インデックス + オートインクリメント）
+    bcps: u8,
+    /// CGB OBJ カラーパレット RAM (8 パレット × 4 色 × 2 バイト = 64 バイト)
+    obj_palette_ram: [u8; 64],
+    /// OCPS (0xFF6A): OBJ パレット仕様レジスタ
+    ocps: u8,
+    /// OPRI (0xFF6C): OBJ 優先度モード (0=OAM 順, 1=X 座標順/DMG 互換)
+    opri: u8,
 }
 
 impl Ppu {
@@ -94,7 +107,8 @@ impl Ppu {
             wy: 0,
             wx: 0,
             cycle: 20,
-            vram: [0; 0x2000],
+            vram: [[0u8; 0x2000]; 2],
+            vbk: 0,
             oam: [0; 0xA0],
             buffer: [0; LCD_WIDTH * LCD_HEIGHT],
             bg_pixel_buffer: [0; LCD_WIDTH * LCD_HEIGHT],
@@ -102,6 +116,11 @@ impl Ppu {
             window_line_counter: 0,
             vblank_irq: false,
             stat_irq: false,
+            bg_palette_ram: [0xFF; 64],
+            bcps: 0,
+            obj_palette_ram: [0xFF; 64],
+            ocps: 0,
+            opri: 0,
         }
     }
 
@@ -111,7 +130,7 @@ impl Ppu {
                 if self.mode == Mode::Drawing {
                     0xFF
                 } else {
-                    self.vram[addr as usize & 0x1FFF]
+                    self.vram[self.vbk as usize][addr as usize & 0x1FFF]
                 }
             }
             0xFE00..=0xFE9F => {
@@ -122,7 +141,7 @@ impl Ppu {
                 }
             }
             0xFF40 => self.lcdc,
-            0xFF41 => 0x80 | self.stat | self.mode as u8, // 最上位bitは常に1、下の二桁はmode
+            0xFF41 => 0x80 | self.stat | self.mode as u8,
             0xFF42 => self.scy,
             0xFF43 => self.scx,
             0xFF44 => self.ly,
@@ -132,6 +151,25 @@ impl Ppu {
             0xFF49 => self.obp1,
             0xFF4A => self.wy,
             0xFF4B => self.wx,
+            // CGB レジスタ（DMG モードでは 0xFF を返す）
+            0xFF4F => self.vbk | 0xFE, // 上位 7bit は 1 固定
+            0xFF68 => self.bcps | if self.cgb_mode { 0 } else { 0xFF },
+            0xFF69 => {
+                if self.cgb_mode {
+                    self.bg_palette_ram[(self.bcps & 0x3F) as usize]
+                } else {
+                    0xFF
+                }
+            }
+            0xFF6A => self.ocps | if self.cgb_mode { 0 } else { 0xFF },
+            0xFF6B => {
+                if self.cgb_mode {
+                    self.obj_palette_ram[(self.ocps & 0x3F) as usize]
+                } else {
+                    0xFF
+                }
+            }
+            0xFF6C => self.opri | 0xFE,
             _ => 0xFF,
         }
     }
@@ -140,7 +178,7 @@ impl Ppu {
         match addr {
             0x8000..=0x9FFF => {
                 if self.mode != Mode::Drawing {
-                    self.vram[addr as usize & 0x1FFF] = val;
+                    self.vram[self.vbk as usize][addr as usize & 0x1FFF] = val;
                 }
             }
             0xFE00..=0xFE9F => {
@@ -160,34 +198,74 @@ impl Ppu {
             0xFF46 => {} // DMA転送はMMU側で処理済み
             0xFF4A => self.wy = val,
             0xFF4B => self.wx = val,
+            // CGB レジスタ
+            0xFF4F => {
+                if self.cgb_mode {
+                    self.vbk = val & 0x01;
+                }
+            }
+            0xFF68 => {
+                if self.cgb_mode {
+                    self.bcps = val & 0xBF; // bit6 は書き込み可（オートインクリメント）
+                }
+            }
+            0xFF69 => {
+                if self.cgb_mode {
+                    let idx = (self.bcps & 0x3F) as usize;
+                    self.bg_palette_ram[idx] = val;
+                    if self.bcps & 0x80 != 0 {
+                        self.bcps = (self.bcps & 0x80) | ((idx as u8 + 1) & 0x3F);
+                    }
+                }
+            }
+            0xFF6A => {
+                if self.cgb_mode {
+                    self.ocps = val & 0xBF;
+                }
+            }
+            0xFF6B => {
+                if self.cgb_mode {
+                    let idx = (self.ocps & 0x3F) as usize;
+                    self.obj_palette_ram[idx] = val;
+                    if self.ocps & 0x80 != 0 {
+                        self.ocps = (self.ocps & 0x80) | ((idx as u8 + 1) & 0x3F);
+                    }
+                }
+            }
+            0xFF6C => {
+                if self.cgb_mode {
+                    self.opri = val & 0x01;
+                }
+            }
             _ => {}
         }
     }
 
-    fn get_pixel_from_tile(&self, tile_idx: usize, row: u8, col: u8) -> u8 {
+    /// タイルデータ 1 ピクセルを取得する。`vram_bank` で参照バンクを指定（Phase 3 で CGB 対応）。
+    fn get_pixel_from_tile(&self, tile_idx: usize, row: u8, col: u8, vram_bank: usize) -> u8 {
         // GB タイルは 2bpp: 1 行 = 2 バイト、low/high の同ビットを組んで 1 ピクセル(0-3)。
         // bit7 が左端なので列 col のビット位置は 7-col。
         let r = (row * 2) as usize;
         let c = (7 - col) as usize;
         let tile_addr = tile_idx << 4;
 
-        let low = self.vram[(tile_addr | r) & 0x1FFF];
-        let high = self.vram[(tile_addr | (r + 1)) & 0x1FFF];
+        let low = self.vram[vram_bank][(tile_addr | r) & 0x1FFF];
+        let high = self.vram[vram_bank][(tile_addr | (r + 1)) & 0x1FFF];
 
         ((low >> c) & 1) | (((high >> c) & 1) << 1)
     }
 
     fn get_tile_idx_from_tile_map(&self, tile_map: bool, row: u8, col: u8) -> usize {
         // tile_map: false=0x9800, true=0x9C00 の 2 つのマップ領域を選ぶ(VRAM offset)。
+        // タイルマップは常に VRAM バンク 0
         let tile_map_addr = if tile_map { 0x1C00 } else { 0x1800 };
 
-        let ret = self.vram[tile_map_addr | (((row as usize) << 5) + col as usize)];
+        let ret = self.vram[0][tile_map_addr | (((row as usize) << 5) + col as usize)];
 
         if self.lcdc & TILE_DATA_ADDRESSING_MODE > 0 {
             ret as usize
         } else {
             // 0x8800アドレッシングモード: タイル番号は符号付き、ベースは0x9000 (VRAM offset 0x1000)
-            // tile_idx = 0x100 + (signed_byte) なので VRAM offset = tile_idx * 16 = 0x1000 + signed * 16
             (0x100i16 + (ret as i8) as i16) as usize
         }
     }
@@ -210,7 +288,7 @@ impl Ppu {
             let pixel_row = y & 7;
             let pixel_col = x & 7;
 
-            let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col);
+            let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col, 0);
             let buf_idx = LCD_WIDTH * self.ly as usize + i;
             self.bg_pixel_buffer[buf_idx] = pixel;
 
@@ -276,7 +354,7 @@ impl Ppu {
                     continue;
                 }
                 let tile_col = if x_flip { 7 - col } else { col };
-                let pixel = self.get_pixel_from_tile(tile_num as usize, effective_row, tile_col);
+                let pixel = self.get_pixel_from_tile(tile_num as usize, effective_row, tile_col, 0);
                 if pixel == 0 {
                     continue; // カラー 0 = 透明
                 }
@@ -310,7 +388,7 @@ impl Ppu {
             let tile_idx = self.get_tile_idx_from_tile_map(tile_map, tile_row, tile_col);
             let pixel_row = self.window_line_counter & 7;
             let pixel_col = x & 7;
-            let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col);
+            let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col, 0);
             let buf_idx = LCD_WIDTH * self.ly as usize + i;
             self.bg_pixel_buffer[buf_idx] = pixel;
             let color_idx = (self.bgp >> (pixel << 1)) & 0b11;
