@@ -30,16 +30,19 @@ fn main() {
     // 7936 KiB (= 8,126,464 byte) を確保する (末尾は EEPROM エミュレーション等に使われる)。
     RuntimeBuilder::from_flexspi(Family::Imxrt1060, 7936 * 1024)
         // FlexRAM 512 KB = 16 バンク(各32KB)を ITCM/DTCM に配分 (OCRAM は専用 OCRAM2 を使用)
+        // CGB 対応で GameBoy 構造体が増大 (PPU VRAM 16KB + buffer 46KB + bg_pixel_buffer 23KB
+        // + WRAM 32KB = ~118KB) したため、ITCM を 128KB に縮小し DTCM を 384KB に拡張した。
+        // CART_RAM (32KB) は OCRAM (.uninit セクション) に移動済みのため DTCM には不要。
+        // DTCM 使用量: スタック 256KB + FB 90KB + misc 10KB = 356KB < 384KB
         .flexram_banks(FlexRamBanks {
             ocram: 0,
-            itcm: 6,  // 192 KB: コード(.text)
-            dtcm: 10, // 320 KB: ベクタ・スタック・静的変数・フレームバッファ
+            itcm: 4,  // 128 KB: コード(.text)
+            dtcm: 12, // 384 KB: ベクタ・スタック・静的変数・フレームバッファ
         })
         .stack(Memory::Dtcm)
-        // GameBoy 構造体 (display の 46KB フレームバッファ + Mmu の PPU/WRAM 約40KB =
-        // 計 ~86KB) を main のスタックローカルとして確保するため、十分なスタックが必要。
-        // 16KB では即スタックオーバーフローしてクラッシュする。DTCM は 320KB あるので余裕。
-        .stack_size(176 * 1024)
+        // GameBoy 構造体 (~118KB) + LLVM が生成する初期化時の一時コピー (~120KB) を
+        // 収めるためスタックを 256KB に設定する。DTCM 384KB - FB(90KB) - misc(10KB) = 284KB 確保可。
+        .stack_size(256 * 1024)
         .stack_size_env_override("TEENSY4_STACK_SIZE")
         .vectors(Memory::Dtcm)
         .text(Memory::Itcm)

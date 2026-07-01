@@ -17,7 +17,12 @@ use gb_core::platform::CartridgeBus;
 // MBC1 の外部 RAM 最大サイズ (4 バンク × 8KB = 32KB)
 const MAX_RAM: usize = 0x8000;
 
-static mut CART_RAM: [u8; MAX_RAM] = [0; MAX_RAM];
+// CART_RAM を OCRAM (uninit セクション) に置いて DTCM スタック予算を節約する。
+// DMA の転送対象でないため DTCM に置く必要はない。
+// FlashCart::new() で明示的にゼロ初期化するため MaybeUninit を使用。
+#[unsafe(link_section = ".uninit.CART_RAM")]
+static mut CART_RAM: core::mem::MaybeUninit<[u8; MAX_RAM]> =
+    core::mem::MaybeUninit::uninit();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FlashCart: include_bytes! で Flash に埋め込まれた ROM
@@ -35,7 +40,16 @@ pub struct FlashCart {
 
 impl FlashCart {
     /// `rom` には `include_bytes!()` で取得した ROM スライスを渡す。
-    pub const fn new(rom: &'static [u8]) -> Self {
+    pub fn new(rom: &'static [u8]) -> Self {
+        // OCRAM (uninit セクション) を明示的にゼロ初期化する。
+        // addr_of_mut! で static mut への参照を作らずポインタを取得する（Rust 2024 制約）。
+        unsafe {
+            core::ptr::write_bytes(
+                core::ptr::addr_of_mut!(CART_RAM) as *mut u8,
+                0,
+                MAX_RAM,
+            );
+        }
         Self {
             rom,
             rom_bank: 1,
@@ -121,7 +135,11 @@ impl CartridgeBus for FlashCart {
                     let bank = if self.mode { self.ram_bank } else { 0 };
                     let offset = bank as usize * 0x2000 + (addr as usize - 0xA000);
                     if offset < ram_size {
-                        unsafe { CART_RAM[offset] }
+                        unsafe {
+                            core::ptr::read(
+                                (core::ptr::addr_of!(CART_RAM) as *const u8).add(offset),
+                            )
+                        }
                     } else {
                         0xFF
                     }
@@ -159,7 +177,10 @@ impl CartridgeBus for FlashCart {
                     let offset = bank as usize * 0x2000 + (addr as usize - 0xA000);
                     if offset < ram_size {
                         unsafe {
-                            CART_RAM[offset] = val;
+                            core::ptr::write(
+                                (core::ptr::addr_of_mut!(CART_RAM) as *mut u8).add(offset),
+                                val,
+                            );
                         }
                     }
                 }
