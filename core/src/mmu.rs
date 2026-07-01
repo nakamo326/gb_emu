@@ -31,6 +31,14 @@ pub struct Mmu<C: CartridgeBus> {
     pub cgb_mode: bool,
     /// KEY1 (0xFF4D): bit7=現在の速度(0=通常, 1=倍速), bit0=切替準備
     key1: u8,
+    /// HDMA 転送元アドレス (HDMA1/2)
+    hdma_src: u16,
+    /// HDMA 転送先アドレス (HDMA3/4, 常に 0x8000-0x9FFF 内)
+    hdma_dst: u16,
+    /// 残り転送ブロック数（1 ブロック = 16 バイト）。0 = 転送なし
+    hdma_remaining: u8,
+    /// true = HBlank DMA、false = 汎用 DMA（汎用は即座に完了するので状態は不要）
+    hdma_hblank_mode: bool,
     /// 割り込みフラグ (0xFF0F)
     pub if_: u8,
     /// 割り込み許可 (0xFFFF)
@@ -55,6 +63,10 @@ impl<C: CartridgeBus> Mmu<C> {
             apu: Apu::new(),
             cgb_mode: false,
             key1: 0,
+            hdma_src: 0,
+            hdma_dst: 0,
+            hdma_remaining: 0,
+            hdma_hblank_mode: false,
             if_: 0,
             ie: 0,
             serial_data: 0,
@@ -76,6 +88,26 @@ impl<C: CartridgeBus> Mmu<C> {
     /// 現在ダブルスピードで動作しているか（KEY1 bit7）
     pub fn double_speed(&self) -> bool {
         self.key1 & 0x80 != 0
+    }
+
+    /// HBlank タイミングで 16 バイトブロックを VRAM に転送する（HBlank DMA）。
+    /// PPU の hblank_trigger が立っているタイミングで GameBoy::step から呼ぶ。
+    pub fn step_hblank_dma(&mut self) {
+        if !self.hdma_hblank_mode || self.hdma_remaining == 0 {
+            return;
+        }
+        let src = self.hdma_src;
+        let dst = 0x8000 | self.hdma_dst;
+        for i in 0..16u16 {
+            let byte = self.read(src + i);
+            self.ppu.write(dst + i, byte);
+        }
+        self.hdma_src = self.hdma_src.wrapping_add(16);
+        self.hdma_dst = (self.hdma_dst.wrapping_add(16)) & 0x1FF0;
+        self.hdma_remaining -= 1;
+        if self.hdma_remaining == 0 {
+            self.hdma_hblank_mode = false;
+        }
     }
 
     /// BootROM をスキップして CGB 起動直後のハードウェアレジスタ値をセットする
@@ -179,6 +211,16 @@ impl<C: CartridgeBus> Mmu<C> {
             0xFF10..=0xFF3F => self.apu.read(addr),
             0xFF40..=0xFF4B | 0xFF4F | 0xFF68..=0xFF6C => self.ppu.read(addr),
             0xFF4D => self.key1 | 0x7E, // 未使用ビットは 1
+            // HDMA: ソース/デスティネーションは書き込みのみ、読み出しは 0xFF
+            0xFF51..=0xFF54 => 0xFF,
+            0xFF55 => {
+                if self.hdma_remaining == 0 {
+                    0xFF // 転送なし
+                } else {
+                    // bit7=0: 転送中、bits 0-6: 残りブロック数-1
+                    (self.hdma_remaining - 1) & 0x7F
+                }
+            }
             0xFF70 => self.wram.read_svbk(),
             0xC000..=0xFDFF => self.wram.read(addr),
             0xFF50 => 0xFF,
@@ -220,8 +262,34 @@ impl<C: CartridgeBus> Mmu<C> {
             0xFF40..=0xFF4B | 0xFF4F | 0xFF68..=0xFF6C => self.ppu.write(addr, val),
             0xFF4D => {
                 if self.cgb_mode {
-                    // bit0 のみソフトウェアから書き込み可能（bit7 はハードウェアが管理）
                     self.key1 = (self.key1 & 0x80) | (val & 0x01);
+                }
+            }
+            0xFF51 => self.hdma_src = (self.hdma_src & 0x00FF) | ((val as u16) << 8),
+            0xFF52 => self.hdma_src = (self.hdma_src & 0xFF00) | (val as u16 & 0xF0),
+            0xFF53 => self.hdma_dst = (self.hdma_dst & 0x00FF) | (((val & 0x1F) as u16) << 8),
+            0xFF54 => self.hdma_dst = (self.hdma_dst & 0xFF00) | (val as u16 & 0xF0),
+            0xFF55 => {
+                if self.cgb_mode {
+                    if val & 0x80 == 0 {
+                        // 汎用 DMA: 全ブロックを即時転送
+                        let blocks = (val & 0x7F) as u16 + 1;
+                        for b in 0..blocks {
+                            let src = self.hdma_src + b * 16;
+                            let dst = 0x8000 | (self.hdma_dst + b * 16);
+                            for i in 0..16u16 {
+                                let byte = self.read(src + i);
+                                self.ppu.write(dst + i, byte);
+                            }
+                        }
+                        self.hdma_src = self.hdma_src.wrapping_add(blocks * 16);
+                        self.hdma_dst = (self.hdma_dst.wrapping_add(blocks * 16)) & 0x1FF0;
+                        self.hdma_remaining = 0;
+                    } else {
+                        // HBlank DMA: 16 バイト/HBlank ずつ転送
+                        self.hdma_remaining = (val & 0x7F) + 1;
+                        self.hdma_hblank_mode = true;
+                    }
                 }
             }
             0xFF70 => self.wram.write_svbk(val),

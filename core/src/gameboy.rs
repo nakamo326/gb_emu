@@ -74,6 +74,8 @@ impl<C: CartridgeBus, D: Display, A: AudioSink, I: InputSource> GameBoy<C, D, A,
             self.audio.push(l, r);
         }
 
+        self.mmu.ppu.hblank_trigger = false;
+
         // PPU: フレーム完成で描画 & 入力ポーリング
         if self.mmu.ppu.emulate_cycle() {
             self.display.draw(self.mmu.ppu.pixel_buffer());
@@ -91,6 +93,11 @@ impl<C: CartridgeBus, D: Display, A: AudioSink, I: InputSource> GameBoy<C, D, A,
         if self.mmu.ppu.stat_irq {
             self.mmu.ppu.stat_irq = false;
             self.mmu.if_ |= 0x02;
+        }
+
+        // HBlank DMA の 16 バイトブロック転送（PPU が HBlank に入ったタイミング）
+        if self.mmu.ppu.hblank_trigger {
+            self.mmu.step_hblank_dma();
         }
 
         result.double_speed = self.mmu.double_speed();

@@ -78,6 +78,8 @@ pub struct Ppu {
     pub vblank_irq: bool,
     /// STAT 割り込み要求フラグ
     pub stat_irq: bool,
+    /// HBlank 突入フラグ（HBlank DMA のトリガーに使用）
+    pub hblank_trigger: bool,
     /// CGB BG カラーパレット RAM (8 パレット × 4 色 × 2 バイト = 64 バイト)
     bg_palette_ram: [u8; 64],
     /// BCPS (0xFF68): BG パレット仕様レジスタ（インデックス + オートインクリメント）
@@ -116,6 +118,7 @@ impl Ppu {
             window_line_counter: 0,
             vblank_irq: false,
             stat_irq: false,
+            hblank_trigger: false,
             bg_palette_ram: [0xFF; 64],
             bcps: 0,
             obj_palette_ram: [0xFF; 64],
@@ -555,6 +558,7 @@ impl Ppu {
                 self.render_sprites();
                 self.mode = Mode::HBlank;
                 self.cycle = 51;
+                self.hblank_trigger = true;
                 if self.stat & HBLANK_INT != 0 {
                     self.stat_irq = true;
                 }
