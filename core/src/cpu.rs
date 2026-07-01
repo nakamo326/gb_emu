@@ -57,6 +57,20 @@ impl Cpu {
         self.regs.pc = 0x0100;
     }
 
+    /// BootROM をスキップして CGB の初期レジスタ値をセットする
+    pub fn apply_cgb_init(&mut self) {
+        self.regs.a = 0x11; // CGB 識別値（A=0x11 で CGB と判定するソフトが多い）
+        self.regs.f = 0x80;
+        self.regs.b = 0x00;
+        self.regs.c = 0x00;
+        self.regs.d = 0xFF;
+        self.regs.e = 0x56;
+        self.regs.h = 0x00;
+        self.regs.l = 0x0D;
+        self.regs.sp = 0xFFFE;
+        self.regs.pc = 0x0100;
+    }
+
     /// 次のオペコードを先読みする（実機同様のオーバーラップ fetch）
     pub fn fetch(&mut self, bus: &dyn MemoryBus) {
         self.opcode = bus.read(self.regs.pc);

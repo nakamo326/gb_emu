@@ -313,6 +313,8 @@ pub struct CartridgeHeader {
     pub cartridge_type: CartridgeType,
     pub rom_size: u8,
     pub ram_size: u8,
+    /// ROM ヘッダ 0x0143: 0x80=CGB 対応、0xC0=CGB 専用、その他=DMG
+    pub cgb_flag: u8,
 }
 
 impl Cartridge {
@@ -324,12 +326,14 @@ impl Cartridge {
         }
 
         let header = CartridgeHeader {
-            title: String::from_utf8_lossy(&rom[0x134..=0x143])
+            // 0x0143 は CGB フラグのためタイトルは 0x134..0x143（15 バイト）まで
+            title: String::from_utf8_lossy(&rom[0x134..0x143])
                 .trim_end_matches('\0')
                 .to_string(),
             cartridge_type: CartridgeType::from(rom[0x147]),
             rom_size: rom[0x148],
             ram_size: rom[0x149],
+            cgb_flag: rom[0x0143],
         };
 
         let ram_size = match header.ram_size {

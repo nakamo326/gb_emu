@@ -34,6 +34,8 @@ struct SpriteData {
 }
 
 pub struct Ppu {
+    /// CGB モードで動作しているか（ROM ヘッダ 0x0143 で決定）
+    pub cgb_mode: bool,
     mode: Mode,
     lcdc: u8,
     stat: u8,
@@ -65,6 +67,7 @@ pub struct Ppu {
 impl Ppu {
     pub fn new() -> Self {
         Self {
+            cgb_mode: false,
             mode: Mode::OAMScan,
             lcdc: 0,
             stat: 0,

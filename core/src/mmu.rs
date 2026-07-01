@@ -27,6 +27,8 @@ pub struct Mmu<C: CartridgeBus> {
     pub timer: Timer,
     pub joypad: Joypad,
     pub apu: Apu,
+    /// CGB モードで動作しているか
+    pub cgb_mode: bool,
     /// 割り込みフラグ (0xFF0F)
     pub if_: u8,
     /// 割り込み許可 (0xFFFF)
@@ -49,12 +51,58 @@ impl<C: CartridgeBus> Mmu<C> {
             timer: Timer::new(),
             joypad: Joypad::new(),
             apu: Apu::new(),
+            cgb_mode: false,
             if_: 0,
             ie: 0,
             serial_data: 0,
             #[cfg(feature = "test-harness")]
             test: TestHarness::new(),
         }
+    }
+
+    /// カートリッジヘッダを読んで CGB モードを確定し、Ppu にも伝播する
+    pub fn set_cgb_mode(&mut self, cgb_mode: bool) {
+        self.cgb_mode = cgb_mode;
+        self.ppu.cgb_mode = cgb_mode;
+    }
+
+    /// BootROM をスキップして CGB 起動直後のハードウェアレジスタ値をセットする
+    pub fn apply_cgb_init(&mut self) {
+        // PPU（DMG と同じ初期値）
+        self.write(0xFF40, 0x91); // LCDC
+        self.write(0xFF41, 0x85); // STAT
+        self.write(0xFF47, 0xFC); // BGP（DMG 互換パレット）
+        self.write(0xFF48, 0xFF); // OBP0
+        self.write(0xFF49, 0xFF); // OBP1
+        // CGB 追加レジスタ
+        self.write(0xFF4D, 0xFF); // KEY1: ダブルスピード未対応（bit7=0: 通常速度）
+        self.write(0xFF4F, 0x00); // VBK: VRAM バンク 0
+        self.write(0xFF70, 0x01); // SVBK: WRAM バンク 1
+        // タイマー
+        self.write(0xFF05, 0x00);
+        self.write(0xFF06, 0x00);
+        self.write(0xFF07, 0x00);
+        // APU
+        self.write(0xFF26, 0xF1);
+        self.write(0xFF25, 0xF3);
+        self.write(0xFF24, 0x77);
+        self.write(0xFF10, 0x80);
+        self.write(0xFF11, 0xBF);
+        self.write(0xFF12, 0xF3);
+        self.write(0xFF14, 0xBF);
+        self.write(0xFF16, 0x3F);
+        self.write(0xFF17, 0x00);
+        self.write(0xFF19, 0xBF);
+        self.write(0xFF1A, 0x7F);
+        self.write(0xFF1B, 0xFF);
+        self.write(0xFF1C, 0x9F);
+        self.write(0xFF1E, 0xBF);
+        self.write(0xFF21, 0x00);
+        self.write(0xFF22, 0x00);
+        self.write(0xFF23, 0xBF);
+        // 割り込み
+        self.if_ = 0xE1;
+        self.ie = 0x00;
     }
 
     /// BootROM をスキップして DMG 起動直後のハードウェアレジスタ値をセットする
