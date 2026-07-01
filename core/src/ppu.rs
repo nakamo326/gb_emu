@@ -255,45 +255,66 @@ impl Ppu {
         ((low >> c) & 1) | (((high >> c) & 1) << 1)
     }
 
-    fn get_tile_idx_from_tile_map(&self, tile_map: bool, row: u8, col: u8) -> usize {
-        // tile_map: false=0x9800, true=0x9C00 の 2 つのマップ領域を選ぶ(VRAM offset)。
-        // タイルマップは常に VRAM バンク 0
-        let tile_map_addr = if tile_map { 0x1C00 } else { 0x1800 };
-
-        let ret = self.vram[0][tile_map_addr | (((row as usize) << 5) + col as usize)];
-
-        if self.lcdc & TILE_DATA_ADDRESSING_MODE > 0 {
-            ret as usize
-        } else {
-            // 0x8800アドレッシングモード: タイル番号は符号付き、ベースは0x9000 (VRAM offset 0x1000)
-            (0x100i16 + (ret as i8) as i16) as usize
-        }
-    }
 
     fn render_bg(&mut self) {
+        // CGB: LCDC bit0=0 は "BG/Window master disable" → 画面を白で塗り透明扱い
         if self.lcdc & BG_WINDOW_ENABLE == 0 {
+            if self.cgb_mode {
+                let base = LCD_WIDTH * self.ly as usize;
+                for i in 0..LCD_WIDTH {
+                    self.bg_pixel_buffer[base + i] = 0;
+                    self.buffer[base + i] = 0x7FFF;
+                }
+            }
             return;
         }
         let y = self.ly.wrapping_add(self.scy);
+        let tile_map = self.lcdc & BG_TILE_MAP > 0;
+        let tile_map_base = if tile_map { 0x1C00 } else { 0x1800 };
+
         for i in 0..LCD_WIDTH {
             let x = (i as u8).wrapping_add(self.scx);
+            let tile_row = (y / 8) as usize;
+            let tile_col = (x / 8) as usize;
+            let tile_offset = (tile_row << 5) + tile_col;
+            let tile_addr = tile_map_base + tile_offset;
 
-            let tile_row = y / 8;
-            let tile_col = x / 8;
-            let tile_map = self.lcdc & BG_TILE_MAP > 0;
-
-            let tile_idx =
-                self.get_tile_idx_from_tile_map(tile_map, tile_row as u8, tile_col as u8);
+            let raw_idx = self.vram[0][tile_addr];
+            let tile_idx = if self.lcdc & TILE_DATA_ADDRESSING_MODE > 0 {
+                raw_idx as usize
+            } else {
+                (0x100i16 + (raw_idx as i8) as i16) as usize
+            };
 
             let pixel_row = y & 7;
             let pixel_col = x & 7;
-
-            let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col, 0);
             let buf_idx = LCD_WIDTH * self.ly as usize + i;
-            self.bg_pixel_buffer[buf_idx] = pixel;
 
-            let color_idx = (self.bgp >> (pixel << 1)) & 0b11;
-            self.buffer[buf_idx] = DMG_PALETTE[color_idx as usize];
+            if self.cgb_mode {
+                let attrs = self.vram[1][tile_addr];
+                let palette_num = (attrs & 0x07) as usize;
+                let vram_bank = ((attrs >> 3) & 0x01) as usize;
+                let h_flip = attrs & 0x20 != 0;
+                let v_flip = attrs & 0x40 != 0;
+                let bg_prio = attrs & 0x80 != 0;
+
+                let r = if v_flip { 7 - pixel_row } else { pixel_row };
+                let c = if h_flip { 7 - pixel_col } else { pixel_col };
+                let pixel = self.get_pixel_from_tile(tile_idx, r, c, vram_bank);
+
+                // bit7 に BG タイル優先度を格納（Phase 4 のスプライト優先度判定で使用）
+                self.bg_pixel_buffer[buf_idx] = pixel | if bg_prio { 0x80 } else { 0 };
+
+                let palette_base = palette_num * 8 + pixel as usize * 2;
+                let lo = self.bg_palette_ram[palette_base];
+                let hi = self.bg_palette_ram[palette_base + 1];
+                self.buffer[buf_idx] = lo as u16 | ((hi as u16) << 8);
+            } else {
+                let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col, 0);
+                self.bg_pixel_buffer[buf_idx] = pixel;
+                let color_idx = (self.bgp >> (pixel << 1)) & 0b11;
+                self.buffer[buf_idx] = DMG_PALETTE[color_idx as usize];
+            }
         }
     }
 
@@ -359,8 +380,9 @@ impl Ppu {
                     continue; // カラー 0 = 透明
                 }
                 let buf_idx = LCD_WIDTH * self.ly as usize + px as usize;
-                // bg_priority=1 の場合、BG カラーが 0 でなければスプライトを隠す
-                if bg_priority && self.bg_pixel_buffer[buf_idx] != 0 {
+                // OAM bit7=1 かつ BG ピクセル(bits 0-1)が非透明ならスプライトを隠す
+                // bit7 は CGB BG タイル優先度フラグ（Phase 4 で複合判定に拡張）
+                if bg_priority && (self.bg_pixel_buffer[buf_idx] & 0x03) != 0 {
                     continue;
                 }
                 let color_idx = (palette >> (pixel << 1)) & 0b11;
@@ -381,18 +403,50 @@ impl Ppu {
             return;
         }
         let tile_map = self.lcdc & WINDOW_TILE_MAP != 0;
+        let tile_map_base = if tile_map { 0x1C00 } else { 0x1800 };
+
         for i in win_x_start..LCD_WIDTH {
             let x = (i - win_x_start) as u8;
-            let tile_row = self.window_line_counter / 8;
-            let tile_col = x / 8;
-            let tile_idx = self.get_tile_idx_from_tile_map(tile_map, tile_row, tile_col);
+            let tile_row = (self.window_line_counter / 8) as usize;
+            let tile_col = (x / 8) as usize;
+            let tile_offset = (tile_row << 5) + tile_col;
+            let tile_addr = tile_map_base + tile_offset;
+
+            let raw_idx = self.vram[0][tile_addr];
+            let tile_idx = if self.lcdc & TILE_DATA_ADDRESSING_MODE > 0 {
+                raw_idx as usize
+            } else {
+                (0x100i16 + (raw_idx as i8) as i16) as usize
+            };
+
             let pixel_row = self.window_line_counter & 7;
             let pixel_col = x & 7;
-            let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col, 0);
             let buf_idx = LCD_WIDTH * self.ly as usize + i;
-            self.bg_pixel_buffer[buf_idx] = pixel;
-            let color_idx = (self.bgp >> (pixel << 1)) & 0b11;
-            self.buffer[buf_idx] = DMG_PALETTE[color_idx as usize];
+
+            if self.cgb_mode {
+                let attrs = self.vram[1][tile_addr];
+                let palette_num = (attrs & 0x07) as usize;
+                let vram_bank = ((attrs >> 3) & 0x01) as usize;
+                let h_flip = attrs & 0x20 != 0;
+                let v_flip = attrs & 0x40 != 0;
+                let bg_prio = attrs & 0x80 != 0;
+
+                let r = if v_flip { 7 - pixel_row } else { pixel_row };
+                let c = if h_flip { 7 - pixel_col } else { pixel_col };
+                let pixel = self.get_pixel_from_tile(tile_idx, r, c, vram_bank);
+
+                self.bg_pixel_buffer[buf_idx] = pixel | if bg_prio { 0x80 } else { 0 };
+
+                let palette_base = palette_num * 8 + pixel as usize * 2;
+                let lo = self.bg_palette_ram[palette_base];
+                let hi = self.bg_palette_ram[palette_base + 1];
+                self.buffer[buf_idx] = lo as u16 | ((hi as u16) << 8);
+            } else {
+                let pixel = self.get_pixel_from_tile(tile_idx, pixel_row, pixel_col, 0);
+                self.bg_pixel_buffer[buf_idx] = pixel;
+                let color_idx = (self.bgp >> (pixel << 1)) & 0b11;
+                self.buffer[buf_idx] = DMG_PALETTE[color_idx as usize];
+            }
         }
         self.window_line_counter += 1;
     }
