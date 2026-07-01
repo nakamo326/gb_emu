@@ -32,11 +32,14 @@ pub struct GameBoy<C: CartridgeBus, D: Display, A: AudioSink, I: InputSource> {
 impl<C: CartridgeBus, D: Display, A: AudioSink, I: InputSource> GameBoy<C, D, A, I> {
     pub fn new(mut mmu: Mmu<C>, display: D, audio: A, input: I) -> Self {
         let mut cpu = Cpu::new();
+        // BootROM の有無にかかわらず ROM ヘッダで CGB モードを決定する。
+        // DMG BootROM は CGB レジスタを初期化しないため、BootROM あり CGB ROM でも
+        // cgb_mode だけは先に確定させる必要がある。
+        let cgb_flag = mmu.cart.read(0x0143);
+        let cgb_mode = cgb_flag == 0x80 || cgb_flag == 0xC0;
+        mmu.set_cgb_mode(cgb_mode);
         if !mmu.bootrom.is_active() {
-            // ROM ヘッダ 0x0143 で CGB モードを判定（BootROM がない場合のみ）
-            let cgb_flag = mmu.cart.read(0x0143);
-            let cgb_mode = cgb_flag == 0x80 || cgb_flag == 0xC0;
-            mmu.set_cgb_mode(cgb_mode);
+            // BootROM なし: ソフトウェアで起動直後のハードウェア状態を再現する
             if cgb_mode {
                 cpu.apply_cgb_init();
                 mmu.apply_cgb_init();

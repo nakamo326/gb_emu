@@ -333,9 +333,11 @@ impl Ppu {
             let x = self.oam[base + 1];
             let tile_num = self.oam[base + 2];
             let flags = self.oam[base + 3];
-            // スプライトの画面 Y 座標 (OAM の y は +16 オフセット)
-            let screen_y = y.wrapping_sub(16);
-            if self.ly >= screen_y && self.ly < screen_y.wrapping_add(sprite_height) {
+            // OAM y はスプライト上端 + 16。u8 ラップを避けるため u16 で比較する。
+            let ly16 = self.ly as u16;
+            let y16 = y as u16;
+            let h16 = sprite_height as u16;
+            if y16 > ly16 + 16 - h16 && y16 <= ly16 + 16 {
                 let _ = self.sprite_buffer.push(SpriteData { x, y, tile_num, flags, order: i as u8 });
             }
         }
@@ -356,8 +358,13 @@ impl Ppu {
             return;
         }
         let sprite_height: u8 = if self.lcdc & SPRITE_SIZE != 0 { 16 } else { 8 };
-        // 逆順で描画（優先度の低いスプライトから描き、最終的に優先度高が上書きして前面に来る）
-        for i in (0..self.sprite_buffer.len()).rev() {
+        // 高優先度スプライト（低 OAM インデックス / 低 X 座標）から順に処理する。
+        // 不透明ピクセルをどのスプライトが担当したかを追跡し、
+        // 一度担当が決まったピクセルには後続の低優先度スプライトが干渉できないようにする。
+        // これにより「高優先度スプライトが BG に隠れたとき低優先度スプライトが
+        // 誤って表示される」バグを防ぐ。
+        let mut sprite_resolved = [false; LCD_WIDTH];
+        for i in 0..self.sprite_buffer.len() {
             let s = &self.sprite_buffer[i];
             let screen_x = s.x.wrapping_sub(8);
             let screen_y = s.y.wrapping_sub(16);
@@ -385,13 +392,20 @@ impl Ppu {
                 if px >= LCD_WIDTH as u8 {
                     continue;
                 }
+                // 既に高優先度スプライトが担当済みのピクセルはスキップ
+                if sprite_resolved[px as usize] {
+                    continue;
+                }
                 let tile_col = if x_flip { 7 - col } else { col };
 
                 let vram_bank = if self.cgb_mode { cgb_vram_bank } else { 0 };
                 let pixel = self.get_pixel_from_tile(tile_num as usize, effective_row, tile_col, vram_bank);
                 if pixel == 0 {
-                    continue; // カラー 0 = 透明
+                    continue; // カラー 0 = 透明（後続スプライトに機会を残す）
                 }
+                // 不透明ピクセル: このスプライトがここを担当（隠れるかどうかに関わらず確定）
+                sprite_resolved[px as usize] = true;
+
                 let buf_idx = LCD_WIDTH * self.ly as usize + px as usize;
                 let bg_px = self.bg_pixel_buffer[buf_idx];
                 let bg_opaque = (bg_px & 0x03) != 0;
