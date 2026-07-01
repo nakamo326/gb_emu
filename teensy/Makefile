@@ -13,13 +13,17 @@ TEENSY_CLI := teensy_loader_cli
 ELF := target/$(TARGET)/release/gb-teensy
 HEX := target/$(TARGET)/release/gb-teensy.hex
 
+# 埋め込む ROM ファイル（絶対パスで渡す）。
+# 上書き例: make ROM=../blargg/cgb-acid2.gbc build
+ROM ?= $(abspath ../roms/game.gb)
+
 .PHONY: build build-debug hex flash deploy clean
 
 build:
-	RUSTC="$(RUSTC)" $(CARGO) build --target $(TARGET) --release
+	GB_ROM="$(ROM)" RUSTC="$(RUSTC)" $(CARGO) build --target $(TARGET) --release
 
 build-debug:
-	RUSTC="$(RUSTC)" $(CARGO) build --target $(TARGET)
+	GB_ROM="$(ROM)" RUSTC="$(RUSTC)" $(CARGO) build --target $(TARGET)
 
 hex: build
 	$(OBJCOPY) -O ihex $(ELF) $(HEX)

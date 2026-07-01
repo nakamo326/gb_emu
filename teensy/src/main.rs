@@ -60,8 +60,10 @@ use sdcard::FlashCart;
 /// ROM は Flash に埋め込み (include_bytes!)。
 /// SDカード対応は docs/teensy_setup_guide.md を参照。
 
-// ROM は Flash に埋め込む。ビルド前に roms/game.gb を配置すること。
-static ROM: &[u8] = include_bytes!("../../roms/game.gb");
+// ROM は Flash に埋め込む。
+// デフォルトは roms/game.gb。GB_ROM 環境変数または Makefile の ROM 変数で上書き可能:
+//   make ROM=/path/to/game.gbc build
+static ROM: &[u8] = include_bytes!(env!("GB_ROM_PATH"));
 
 #[bsp::rt::entry]
 fn main() -> ! {

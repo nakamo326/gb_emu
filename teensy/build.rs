@@ -1,6 +1,27 @@
 use imxrt_rt::{Family, FlexRamBanks, Memory, RuntimeBuilder};
+use std::path::PathBuf;
 
 fn main() {
+    // --- ROM パス解決 ---
+    // GB_ROM 環境変数で上書き可能。未指定時は roms/game.gb を使用。
+    // Makefile からは: GB_ROM="$(ROM)" cargo build ...
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let rom_path = match std::env::var("GB_ROM") {
+        Ok(p) => {
+            let p = PathBuf::from(&p);
+            if p.is_absolute() { p } else { manifest_dir.join(p) }
+        }
+        Err(_) => manifest_dir.join("../../roms/game.gb"),
+    };
+    let rom_path = rom_path.canonicalize().unwrap_or_else(|e| {
+        panic!("ROM not found at {}: {}", rom_path.display(), e)
+    });
+    // cargo:rustc-env で main.rs の env!("GB_ROM_PATH") に渡す
+    println!("cargo:rustc-env=GB_ROM_PATH={}", rom_path.display());
+    println!("cargo:rerun-if-env-changed=GB_ROM");
+    println!("cargo:rerun-if-changed={}", rom_path.display());
+
+
     // i.MX RT1062 (Teensy 4.1) 向けランタイムを生成する。
     // FCB / IVT / boot data の配置・FlexRAM バンク設定・リンカスクリプト (t4link.x) を
     // imxrt-rt が自動生成するため、手書きの memory.x は不要。
