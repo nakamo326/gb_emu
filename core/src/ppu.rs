@@ -336,11 +336,16 @@ impl Ppu {
                 let _ = self.sprite_buffer.push(SpriteData { x, y, tile_num, flags, order: i as u8 });
             }
         }
-        // X 座標で安定ソート（小さい X が優先、同値は OAM 順）。
+        // OPRI=0 (CGB デフォルト): OAM インデックス順（order のみで並べる）
+        // OPRI=1 または DMG: X 座標優先、同値は OAM 順
         // heapless::Vec は alloc 依存の sort_by_key を持たないため slice の
         // sort_unstable_by を使い、order を第二鍵にして安定性を確保する。
-        self.sprite_buffer
-            .sort_unstable_by(|a, b| a.x.cmp(&b.x).then(a.order.cmp(&b.order)));
+        if self.cgb_mode && self.opri == 0 {
+            self.sprite_buffer.sort_unstable_by(|a, b| a.order.cmp(&b.order));
+        } else {
+            self.sprite_buffer
+                .sort_unstable_by(|a, b| a.x.cmp(&b.x).then(a.order.cmp(&b.order)));
+        }
     }
 
     fn render_sprites(&mut self) {
@@ -348,15 +353,18 @@ impl Ppu {
             return;
         }
         let sprite_height: u8 = if self.lcdc & SPRITE_SIZE != 0 { 16 } else { 8 };
-        // 逆順で描画（X が小さいスプライトが最終的に上書きして前面に来る）
+        // 逆順で描画（優先度の低いスプライトから描き、最終的に優先度高が上書きして前面に来る）
         for i in (0..self.sprite_buffer.len()).rev() {
             let s = &self.sprite_buffer[i];
             let screen_x = s.x.wrapping_sub(8);
             let screen_y = s.y.wrapping_sub(16);
-            let palette = if s.flags & 0x10 != 0 { self.obp1 } else { self.obp0 };
             let y_flip = s.flags & 0x40 != 0;
             let x_flip = s.flags & 0x20 != 0;
-            let bg_priority = s.flags & 0x80 != 0;
+            let oam_bg_priority = s.flags & 0x80 != 0;
+
+            // CGB 属性
+            let cgb_palette_num = (s.flags & 0x07) as usize;
+            let cgb_vram_bank = ((s.flags >> 3) & 0x01) as usize;
 
             let row = self.ly.wrapping_sub(screen_y);
             let tile_row = if y_flip { sprite_height - 1 - row } else { row };
@@ -375,18 +383,42 @@ impl Ppu {
                     continue;
                 }
                 let tile_col = if x_flip { 7 - col } else { col };
-                let pixel = self.get_pixel_from_tile(tile_num as usize, effective_row, tile_col, 0);
+
+                let vram_bank = if self.cgb_mode { cgb_vram_bank } else { 0 };
+                let pixel = self.get_pixel_from_tile(tile_num as usize, effective_row, tile_col, vram_bank);
                 if pixel == 0 {
                     continue; // カラー 0 = 透明
                 }
                 let buf_idx = LCD_WIDTH * self.ly as usize + px as usize;
-                // OAM bit7=1 かつ BG ピクセル(bits 0-1)が非透明ならスプライトを隠す
-                // bit7 は CGB BG タイル優先度フラグ（Phase 4 で複合判定に拡張）
-                if bg_priority && (self.bg_pixel_buffer[buf_idx] & 0x03) != 0 {
+                let bg_px = self.bg_pixel_buffer[buf_idx];
+                let bg_opaque = (bg_px & 0x03) != 0;
+
+                // 優先度判定
+                // CGB: LCDC bit0=0 の場合は OBJ が常に前面（BG master priority 無効）
+                // それ以外: OAM bit7=1 または BG タイル bit7=1 かつ BG が非透明 → BG 前面
+                let hidden = if self.cgb_mode {
+                    if self.lcdc & BG_WINDOW_ENABLE == 0 {
+                        false // BG master priority 無効: OBJ 常に前面
+                    } else {
+                        (oam_bg_priority || (bg_px & 0x80 != 0)) && bg_opaque
+                    }
+                } else {
+                    oam_bg_priority && bg_opaque
+                };
+                if hidden {
                     continue;
                 }
-                let color_idx = (palette >> (pixel << 1)) & 0b11;
-                self.buffer[buf_idx] = DMG_PALETTE[color_idx as usize];
+
+                self.buffer[buf_idx] = if self.cgb_mode {
+                    let palette_base = cgb_palette_num * 8 + pixel as usize * 2;
+                    let lo = self.obj_palette_ram[palette_base];
+                    let hi = self.obj_palette_ram[palette_base + 1];
+                    lo as u16 | ((hi as u16) << 8)
+                } else {
+                    let palette = if s.flags & 0x10 != 0 { self.obp1 } else { self.obp0 };
+                    let color_idx = (palette >> (pixel << 1)) & 0b11;
+                    DMG_PALETTE[color_idx as usize]
+                };
             }
         }
     }
