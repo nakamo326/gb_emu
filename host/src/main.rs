@@ -92,19 +92,25 @@ fn load_bootrom() -> Bootrom {
 
 /// wall-clock catch-up 方式のメインループ。
 /// step() を現実時間に追いつくペースで呼び出し、quit が立ったら終了する。
+/// CGB ダブルスピード時は M_CYCLE_NS を半分にしてタイミングを調整する。
 fn run_loop(mut step: impl FnMut() -> StepResult) {
     let start = Instant::now();
     let mut emulated_ns: u128 = 0;
+    let mut cycle_ns = M_CYCLE_NS;
 
     loop {
         let elapsed = start.elapsed().as_nanos();
-        let cycles = (elapsed - emulated_ns) / M_CYCLE_NS;
+        let cycles = (elapsed - emulated_ns) / cycle_ns;
+        let mut last = StepResult::default();
         for _ in 0..cycles {
-            if step().quit {
+            last = step();
+            if last.quit {
                 return;
             }
         }
-        emulated_ns += cycles * M_CYCLE_NS;
+        emulated_ns += cycles * cycle_ns;
+        // ダブルスピード切替時にサイクル長を更新
+        cycle_ns = if last.double_speed { M_CYCLE_NS / 2 } else { M_CYCLE_NS };
         std::thread::sleep(Duration::from_millis(1));
     }
 }

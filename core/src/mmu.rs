@@ -29,6 +29,8 @@ pub struct Mmu<C: CartridgeBus> {
     pub apu: Apu,
     /// CGB モードで動作しているか
     pub cgb_mode: bool,
+    /// KEY1 (0xFF4D): bit7=現在の速度(0=通常, 1=倍速), bit0=切替準備
+    key1: u8,
     /// 割り込みフラグ (0xFF0F)
     pub if_: u8,
     /// 割り込み許可 (0xFFFF)
@@ -52,6 +54,7 @@ impl<C: CartridgeBus> Mmu<C> {
             joypad: Joypad::new(),
             apu: Apu::new(),
             cgb_mode: false,
+            key1: 0,
             if_: 0,
             ie: 0,
             serial_data: 0,
@@ -64,6 +67,15 @@ impl<C: CartridgeBus> Mmu<C> {
     pub fn set_cgb_mode(&mut self, cgb_mode: bool) {
         self.cgb_mode = cgb_mode;
         self.ppu.cgb_mode = cgb_mode;
+        if cgb_mode {
+            // KEY1 初期値: 通常速度・切替準備なし
+            self.key1 = 0x00;
+        }
+    }
+
+    /// 現在ダブルスピードで動作しているか（KEY1 bit7）
+    pub fn double_speed(&self) -> bool {
+        self.key1 & 0x80 != 0
     }
 
     /// BootROM をスキップして CGB 起動直後のハードウェアレジスタ値をセットする
@@ -75,7 +87,7 @@ impl<C: CartridgeBus> Mmu<C> {
         self.write(0xFF48, 0xFF); // OBP0
         self.write(0xFF49, 0xFF); // OBP1
         // CGB 追加レジスタ
-        self.write(0xFF4D, 0xFF); // KEY1: ダブルスピード未対応（bit7=0: 通常速度）
+        self.key1 = 0x00; // KEY1: 通常速度・切替準備なし
         self.write(0xFF4F, 0x00); // VBK: VRAM バンク 0
         self.write(0xFF70, 0x01); // SVBK: WRAM バンク 1
         // タイマー
@@ -166,6 +178,7 @@ impl<C: CartridgeBus> Mmu<C> {
             0xFF0F => self.if_ | 0xE0, // 上位3bitは常に1
             0xFF10..=0xFF3F => self.apu.read(addr),
             0xFF40..=0xFF4B | 0xFF4F | 0xFF68..=0xFF6C => self.ppu.read(addr),
+            0xFF4D => self.key1 | 0x7E, // 未使用ビットは 1
             0xFF70 => self.wram.read_svbk(),
             0xC000..=0xFDFF => self.wram.read(addr),
             0xFF50 => 0xFF,
@@ -205,6 +218,12 @@ impl<C: CartridgeBus> Mmu<C> {
                 }
             }
             0xFF40..=0xFF4B | 0xFF4F | 0xFF68..=0xFF6C => self.ppu.write(addr, val),
+            0xFF4D => {
+                if self.cgb_mode {
+                    // bit0 のみソフトウェアから書き込み可能（bit7 はハードウェアが管理）
+                    self.key1 = (self.key1 & 0x80) | (val & 0x01);
+                }
+            }
             0xFF70 => self.wram.write_svbk(val),
             0xC000..=0xFDFF => self.wram.write(addr, val),
             0xFF50 => self.bootrom.write(addr, val),

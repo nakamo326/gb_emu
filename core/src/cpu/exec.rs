@@ -1122,8 +1122,13 @@ pub(crate) fn exec_halt(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
     true
 }
 
-pub(crate) fn exec_stop(_cpu: &mut Cpu, _bus: &mut dyn MemoryBus) -> bool {
-    // STOP は NOP として扱う(GBC速度切替は未実装)
+pub(crate) fn exec_stop(_cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
+    // CGB: KEY1 (0xFF4D) bit0 が立っていればダブルスピード切替
+    let key1 = bus.read(0xFF4D);
+    if key1 & 0x01 != 0 {
+        // bit7 を反転（通常↔倍速）、bit0 をクリア
+        bus.write(0xFF4D, key1 ^ 0x80);
+    }
     true
 }
 

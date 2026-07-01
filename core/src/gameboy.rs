@@ -13,6 +13,8 @@ pub struct StepResult {
     pub frame_ready: bool,
     /// 終了要求（入力の quit が立った）
     pub quit: bool,
+    /// CGB ダブルスピードモードで動作中（メインループのタイミング調整に使用）
+    pub double_speed: bool,
 }
 
 /// CPU・MMU と各プラットフォーム実装（表示・音声・入力・カート）を束ねる。
@@ -91,6 +93,7 @@ impl<C: CartridgeBus, D: Display, A: AudioSink, I: InputSource> GameBoy<C, D, A,
             self.mmu.if_ |= 0x02;
         }
 
+        result.double_speed = self.mmu.double_speed();
         result
     }
 }
