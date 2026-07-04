@@ -26,7 +26,7 @@ build-debug:
 	GB_ROM="$(ROM)" RUSTC="$(RUSTC)" $(CARGO) build --target $(TARGET)
 
 hex: build
-	$(OBJCOPY) -O ihex $(ELF) $(HEX)
+	LD_LIBRARY_PATH="$(RUSTC_SYSROOT)/lib" $(OBJCOPY) -O ihex $(ELF) $(HEX)
 	@echo "Generated: $(HEX)"
 
 flash: hex
