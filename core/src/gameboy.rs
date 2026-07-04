@@ -61,6 +61,16 @@ impl<C: CartridgeBus, D: Display, A: AudioSink, I: InputSource> GameBoy<C, D, A,
         &mut self.display
     }
 
+    /// デバッグ用: CPU の (PC, HALT 中か, IME)。
+    pub fn debug_cpu(&self) -> (u16, bool, bool) {
+        self.cpu.debug_state()
+    }
+
+    /// デバッグ用: CPU の (A, HL, SP)。
+    pub fn debug_regs(&self) -> (u8, u16, u16) {
+        self.cpu.debug_regs()
+    }
+
     /// 1 M-cycle 進める。フレーム完成時に display へ draw し、入力をポーリングする。
     pub fn step(&mut self) -> StepResult {
         let mut result = StepResult::default();

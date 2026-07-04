@@ -1,6 +1,7 @@
-mod cartridge;
 mod lcd;
 mod renderer;
+
+use gb_host::cartridge;
 
 use gb_core::bootrom::Bootrom;
 use gb_core::gameboy::{GameBoy, StepResult};

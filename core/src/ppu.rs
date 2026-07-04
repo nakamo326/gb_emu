@@ -585,4 +585,15 @@ impl Ppu {
     pub fn pixel_buffer(&self) -> &[u16] {
         &self.buffer
     }
+
+    /// デバッグ用: 現在の LCDC 値。
+    pub fn lcdc(&self) -> u8 {
+        self.lcdc
+    }
+
+    /// デバッグ用: BG カラーパレット `idx` (0-7) の色 0 (RGB555 raw)。
+    pub fn bg_palette_color0(&self, idx: usize) -> u16 {
+        let base = idx * 8;
+        self.bg_palette_ram[base] as u16 | ((self.bg_palette_ram[base + 1] as u16) << 8)
+    }
 }

@@ -71,6 +71,16 @@ impl Cpu {
         self.regs.pc = 0x0100;
     }
 
+    /// デバッグ用: 現在の PC・HALT 状態・IME。
+    pub fn debug_state(&self) -> (u16, bool, bool) {
+        (self.regs.pc, self.halted, self.ime)
+    }
+
+    /// デバッグ用: (A, HL, SP)。
+    pub fn debug_regs(&self) -> (u8, u16, u16) {
+        (self.regs.a, self.regs.hl(), self.regs.sp)
+    }
+
     /// 次のオペコードを先読みする（実機同様のオーバーラップ fetch）
     pub fn fetch(&mut self, bus: &dyn MemoryBus) {
         self.opcode = bus.read(self.regs.pc);
