@@ -14,7 +14,7 @@ use bsp::board;
 #[allow(unused_imports)]
 use bsp::interrupt;
 
-use gb_core::{bootrom::Bootrom, gameboy::GameBoy, mmu::Mmu, platform::NullAudio};
+use gb_core::{bootrom::Bootrom, gameboy::GameBoy, mmu::Mmu};
 
 // --- USB シリアルログ ---
 struct UsbPollerCell(core::cell::UnsafeCell<Option<imxrt_log::Poller>>);
@@ -30,6 +30,12 @@ fn USB_OTG1() {
     }
 }
 
+#[bsp::rt::interrupt]
+fn SAI1() {
+    audio::on_sai1_interrupt();
+}
+
+use audio::SaiAudio;
 use display::panel::St7789;
 use display::DmaDisplay;
 use input::GpioInput;
@@ -70,6 +76,7 @@ fn main() -> ! {
     let board::Resources {
         usb,
         lpspi4,
+        sai1,
         mut gpio2,
         mut gpio3,
         mut gpio4,
@@ -98,6 +105,11 @@ fn main() -> ! {
         *USB_POLLER.0.get() = Some(poller);
         cortex_m::peripheral::NVIC::unmask(bsp::interrupt::USB_OTG1);
     }
+
+    // ------- SAI1 オーディオ (MAX98357A, I2S) -------
+    // pin 23 は SAI1_MCLK (hal API の要件。MAX98357A 側は未接続でよい)
+    let audio = SaiAudio::new(sai1, pins.p7, pins.p23, pins.p26, pins.p27);
+    unsafe { cortex_m::peripheral::NVIC::unmask(bsp::interrupt::SAI1) };
 
     // ------- ROM (Flash 埋め込み) -------
     let cart = FlashCart::new(ROM);
@@ -154,7 +166,7 @@ fn main() -> ! {
         pins.p36,
     );
     let mmu = Mmu::new(bootrom, cart);
-    let mut gb = GameBoy::new(mmu, display, NullAudio, input);
+    let mut gb = GameBoy::new(mmu, display, audio, input);
 
     // ------- メインループ (フレームペーシング) -------
     // GB 1 フレーム = 70224 T-cycle。ARM クロック換算のフレーム周期 (約16.742ms) ごとに
