@@ -1123,12 +1123,9 @@ pub(crate) fn exec_halt(cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
 }
 
 pub(crate) fn exec_stop(_cpu: &mut Cpu, bus: &mut dyn MemoryBus) -> bool {
-    // CGB: KEY1 (0xFF4D) bit0 が立っていればダブルスピード切替
-    let key1 = bus.read(0xFF4D);
-    if key1 & 0x01 != 0 {
-        // bit7 を反転（通常↔倍速）、bit0 をクリア
-        bus.write(0xFF4D, key1 ^ 0x80);
-    }
+    // CGB: KEY1 (0xFF4D) bit0 が立っていればダブルスピード切替。
+    // bit7（速度フラグ）は通常の write() では変更できない内部状態のため専用メソッドを使う。
+    bus.perform_speed_switch();
     true
 }
 

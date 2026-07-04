@@ -16,6 +16,10 @@ pub trait MemoryBus {
     fn if_(&self) -> u8;
     fn set_if(&mut self, val: u8);
     fn ie(&self) -> u8;
+    /// STOP 命令によるダブルスピード切替（KEY1 bit0 が立っている場合のみ）。
+    /// bit7（速度フラグ）は通常の write() 経由では変更できない内部状態のため、
+    /// 専用メソッドとして公開する。
+    fn perform_speed_switch(&mut self);
 }
 
 pub struct Mmu<C: CartridgeBus> {
@@ -88,6 +92,14 @@ impl<C: CartridgeBus> Mmu<C> {
     /// 現在ダブルスピードで動作しているか（KEY1 bit7）
     pub fn double_speed(&self) -> bool {
         self.key1 & 0x80 != 0
+    }
+
+    /// STOP 命令によるダブルスピード切替を実行する。
+    /// bit0（切替準備）が立っている場合のみ bit7（速度）を反転し、bit0 をクリアする。
+    fn perform_speed_switch(&mut self) {
+        if self.cgb_mode && self.key1 & 0x01 != 0 {
+            self.key1 = (self.key1 ^ 0x80) & !0x01;
+        }
     }
 
     /// HBlank タイミングで 16 バイトブロックを VRAM に転送する（HBlank DMA）。
@@ -384,5 +396,8 @@ impl<C: CartridgeBus> MemoryBus for Mmu<C> {
     }
     fn ie(&self) -> u8 {
         self.ie
+    }
+    fn perform_speed_switch(&mut self) {
+        Mmu::perform_speed_switch(self)
     }
 }
