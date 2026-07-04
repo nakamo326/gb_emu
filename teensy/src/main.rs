@@ -14,7 +14,7 @@ use bsp::board;
 #[allow(unused_imports)]
 use bsp::interrupt;
 
-use gb_core::{bootrom::Bootrom, gameboy::GameBoy, mmu::Mmu};
+use gb_core::{bootrom::Bootrom, gameboy::GameBoy, mmu::Mmu, platform::NullAudio};
 
 // --- USB シリアルログ ---
 struct UsbPollerCell(core::cell::UnsafeCell<Option<imxrt_log::Poller>>);
@@ -35,7 +35,6 @@ fn SAI1() {
     audio::on_sai1_interrupt();
 }
 
-use audio::SaiAudio;
 use display::panel::St7789;
 use display::DmaDisplay;
 use input::GpioInput;
@@ -106,11 +105,6 @@ fn main() -> ! {
         cortex_m::peripheral::NVIC::unmask(bsp::interrupt::USB_OTG1);
     }
 
-    // ------- SAI1 オーディオ (MAX98357A, I2S) -------
-    // pin 23 は SAI1_MCLK (hal API の要件。MAX98357A 側は未接続でよい)
-    let audio = SaiAudio::new(sai1, pins.p7, pins.p23, pins.p26, pins.p27);
-    unsafe { cortex_m::peripheral::NVIC::unmask(bsp::interrupt::SAI1) };
-
     // ------- ROM (Flash 埋め込み) -------
     let cart = FlashCart::new(ROM);
 
@@ -155,6 +149,13 @@ fn main() -> ! {
     let dma_channel = dma[0].take().unwrap();
 
     let display = DmaDisplay::<St7789, _, _, _>::new(spi, dc, rst, dma_channel);
+
+    // ------- SAI1 オーディオ (MAX98357A, I2S) -------
+    // 既知の問題により無効化中: SAI1 を有効化するとランダムなタイミングで
+    // 画面が真っ黒になる (アンプ・カートリッジ回路の有無、初期化順序とは無関係)。
+    // 詳細・調査経緯は docs/teensy_setup_guide.md の「既知の問題」節を参照。
+    let _ = sai1;
+    let audio = NullAudio;
 
     // ------- GB コア -------
 

@@ -54,6 +54,9 @@ static RING: RingBuf = RingBuf {
     tail: AtomicU16::new(0),
 };
 
+// 出力音量 (0.0-1.0)。
+const VOLUME: f32 = 0.2;
+
 pub struct SaiAudio;
 
 impl SaiAudio {
@@ -110,8 +113,8 @@ impl AudioSink for SaiAudio {
             return;
         }
         let idx = (head as usize & (RING_SIZE - 1)) * 2;
-        let l = (left.clamp(-1.0, 1.0) * i16::MAX as f32) as i16 as u16;
-        let r = (right.clamp(-1.0, 1.0) * i16::MAX as f32) as i16 as u16;
+        let l = ((left * VOLUME).clamp(-1.0, 1.0) * i16::MAX as f32) as i16 as u16;
+        let r = ((right * VOLUME).clamp(-1.0, 1.0) * i16::MAX as f32) as i16 as u16;
         unsafe {
             let buf = &mut *RING.data.get();
             buf[idx] = l;

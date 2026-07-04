@@ -173,7 +173,7 @@ teensy/
     │   └── panel.rs         # パネル抽象 (PanelController / Ili9341)
     ├── sdcard.rs            # FlashCart (Flash 埋め込み ROM, RomOnly/MBC1)
     ├── cartridge.rs         # GpioCart (実 GB カートリッジ GPIO バス)
-    ├── audio.rs             # I2S オーディオ (スタブ)
+    ├── audio.rs             # I2S オーディオ (SaiAudio, 画面が黒くなる問題により無効化中)
     └── input.rs             # GPIO ボタン入力 (スタブ)
 ```
 
@@ -250,16 +250,12 @@ ROM 供給は 2 経路あり、**現在 `main.rs` は `FlashCart`（Flash 埋め
 
 ---
 
-### E. I2S AudioSink 実装（優先度: 低）— スタブのみ
+### E. I2S AudioSink 実装（優先度: 低）— 実装済みだが無効化中
 
-`teensy/src/audio.rs` に `PcmAudio` スタブを追加済み。
-`AudioSink::push()` は現在 no-op。現在は `main.rs` で `NullAudio` を使用中。
-
-**次のステップ:**
-- `ccm_analog` で Audio PLL (PLL4) を 11.2896 MHz に設定
-- CCM SAI1 clock root に割り当て
-- `hal::sai::Sai::new()` + `SaiConfig::i2s(bclk_div(8))` で TX 初期化
-- `push()` で f32 → i16 変換 + `sai_tx.write_frame(0, [l, r])`
+`teensy/src/audio.rs` に `SaiAudio`（SAI1 TX + リングバッファ + `FIFO_REQUEST` 割り込み）を
+実装済み。ただし有効化するとディスプレイが真っ黒になる未解決の問題があり、
+`main.rs` では現在も `NullAudio` にフォールバックしている。詳細は
+[teensy_setup_guide.md の「11. 既知の問題」](teensy_setup_guide.md#11-既知の問題) を参照。
 
 **確定ピン配（SAI1 TX）:**
 
@@ -268,8 +264,8 @@ ROM 供給は 2 経路あり、**現在 `main.rs` は `FlashCart`（Flash 埋め
 | SAI1_TX_DATA | 7 | BL は 3.3V 直結化で GPIO 不使用のため pin 7 を確定（競合なし） |
 | SAI1_TX_BCLK | 26 | A4/A5 を pin 24/25 に置いたため cart アドレスと競合しない |
 | SAI1_TX_SYNC | 27 | 同上 |
+| SAI1_MCLK | 23 | hal API の要件で必須（MAX98357A/PCM5102A 側は未接続でよい） |
 
-PCM5102 は MCLK 不要のため 3 本で足りる。
 参考: `imxrt-hal/examples/rtic_sai_pcm5102.rs`
 
 ---
@@ -337,7 +333,7 @@ teensy/src/
 │   └── panel.rs    PanelController / Ili9341 (パネル抽象)
 ├── sdcard.rs       FlashCart — impl CartridgeBus ✅ (Flash 埋め込み, RomOnly/MBC1)
 ├── cartridge.rs    GpioCart — impl CartridgeBus ✅ (実カート用・ピン確定 / scatter実装待ち)
-├── audio.rs        PcmAudio — impl AudioSink (スタブ / SAI 未実装)
+├── audio.rs        SaiAudio — impl AudioSink ⚠️ (実装済みだが画面が黒くなる問題により無効化中)
 └── input.rs        GpioInput — impl InputSource (スタブ / ピン未割当)
 ```
 
