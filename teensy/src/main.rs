@@ -167,6 +167,14 @@ fn main() -> ! {
         pins.p36,
     );
     let mmu = Mmu::new(bootrom, cart);
+    let cgb_flag = ROM.get(0x143).copied().unwrap_or(0);
+    let cart_type = ROM.get(0x147).copied().unwrap_or(0);
+    log::info!(
+        "ROM: cgb_flag=0x{:02X} cart_type=0x{:02X} len={}",
+        cgb_flag,
+        cart_type,
+        ROM.len()
+    );
     let mut gb = GameBoy::new(mmu, display, audio, input);
 
     // ------- メインループ (フレームペーシング) -------

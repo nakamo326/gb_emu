@@ -14,8 +14,9 @@ use gb_core::platform::CartridgeBus;
 /// SPI は `board::lpspi(...)` の戻り値を embedded-hal 1.0 の `SpiDevice` を満たすよう
 /// ラップして渡す。
 
-// MBC1 の外部 RAM 最大サイズ (4 バンク × 8KB = 32KB)
-const MAX_RAM: usize = 0x8000;
+// 外部 RAM 最大サイズ。ポケモンクリスタル (MBC3, ram_size code 0x05 = 64KB) を含め
+// 実測で使用する ROM のうち最大のものに合わせる (8 バンク × 8KB = 64KB)。
+const MAX_RAM: usize = 0x10000;
 
 // CART_RAM を OCRAM (uninit セクション) に置いて DTCM スタック予算を節約する。
 // DMA の転送対象でないため DTCM に置く必要はない。
@@ -28,13 +29,26 @@ static mut CART_RAM: core::mem::MaybeUninit<[u8; MAX_RAM]> =
 // FlashCart: include_bytes! で Flash に埋め込まれた ROM
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// カートリッジ種別 (ROM ヘッダ 0x147 から確定、以後は分岐に使うのみ)。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    RomOnly,
+    Mbc1,
+    Mbc3,
+    Mbc5,
+}
+
 /// Flash に埋め込んだ ROM を CartridgeBus として提供する。
-/// RomOnly (32KB) および MBC1 (最大 2MB ROM + 32KB RAM) をサポート。
+/// RomOnly / MBC1 / MBC3 (RTC はスタブ) / MBC5 をサポート。
 pub struct FlashCart {
     rom: &'static [u8],
-    rom_bank: u8,
+    kind: Kind,
+    ram_size: usize,
+    /// MBC5 は 9bit (0-511) まで使うため u16 で保持。MBC1/MBC3 はこの下位ビットのみ使う。
+    rom_bank: u16,
     ram_bank: u8,
     ram_enabled: bool,
+    /// MBC1 のみ: false=ROM banking mode, true=RAM banking mode
     mode: bool,
 }
 
@@ -50,8 +64,34 @@ impl FlashCart {
                 MAX_RAM,
             );
         }
+        let cart_type = if rom.len() >= 0x148 { rom[0x147] } else { 0x00 };
+        let kind = match cart_type {
+            0x01..=0x03 => Kind::Mbc1,
+            0x0F..=0x13 => Kind::Mbc3,
+            0x19..=0x1E => Kind::Mbc5,
+            _ => Kind::RomOnly,
+        };
+        let has_ram = matches!(
+            cart_type,
+            0x02 | 0x03 | 0x10 | 0x12 | 0x13 | 0x1A | 0x1B | 0x1D | 0x1E
+        );
+        let ram_size = if has_ram && rom.len() >= 0x14A {
+            match rom[0x149] {
+                0x01 => 0x800,   //  2KB
+                0x02 => 0x2000,  //  8KB
+                0x03 => 0x8000,  // 32KB
+                0x04 => 0x20000, // 128KB (MAX_RAM 超過時は起動時に assert で検知)
+                0x05 => 0x10000, // 64KB
+                _ => 0,
+            }
+        } else {
+            0
+        };
+        assert!(ram_size <= MAX_RAM, "cartridge RAM size exceeds MAX_RAM buffer");
         Self {
             rom,
+            kind,
+            ram_size,
             rom_bank: 1,
             ram_bank: 0,
             ram_enabled: false,
@@ -59,31 +99,19 @@ impl FlashCart {
         }
     }
 
-    fn cart_type(&self) -> u8 {
-        if self.rom.len() >= 0x148 {
-            self.rom[0x147]
+    fn ram_read(&self, offset: usize) -> u8 {
+        if offset < self.ram_size {
+            unsafe { core::ptr::read((core::ptr::addr_of!(CART_RAM) as *const u8).add(offset)) }
         } else {
-            0x00
+            0xFF
         }
     }
 
-    fn is_mbc1(&self) -> bool {
-        matches!(self.cart_type(), 0x01..=0x03)
-    }
-
-    fn has_ram(&self) -> bool {
-        matches!(self.cart_type(), 0x02 | 0x03)
-    }
-
-    fn ram_size(&self) -> usize {
-        if !self.has_ram() || self.rom.len() < 0x14A {
-            return 0;
-        }
-        match self.rom[0x149] {
-            0x01 => 0x800,  //  2KB
-            0x02 => 0x2000, //  8KB
-            0x03 => 0x8000, // 32KB
-            _ => 0,
+    fn ram_write(&mut self, offset: usize, val: u8) {
+        if offset < self.ram_size {
+            unsafe {
+                core::ptr::write((core::ptr::addr_of_mut!(CART_RAM) as *mut u8).add(offset), val)
+            }
         }
     }
 }
@@ -92,99 +120,137 @@ impl CartridgeBus for FlashCart {
     fn read(&self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x3FFF => {
-                if self.is_mbc1() {
+                if self.kind == Kind::Mbc1 {
                     let bank = if self.mode && self.rom.len() > 0x80000 {
-                        (self.ram_bank << 5) & 0x60
+                        ((self.ram_bank as u16) << 5) & 0x60
                     } else {
                         0
                     };
                     let offset = bank as usize * 0x4000 + addr as usize;
-                    if offset < self.rom.len() {
-                        self.rom[offset]
-                    } else {
-                        0xFF
-                    }
+                    self.rom.get(offset).copied().unwrap_or(0xFF)
                 } else {
                     self.rom.get(addr as usize).copied().unwrap_or(0xFF)
                 }
             }
 
             0x4000..=0x7FFF => {
-                if self.is_mbc1() {
-                    let mut bank = self.rom_bank;
-                    if self.rom.len() > 0x80000 {
-                        bank |= (self.ram_bank << 5) & 0x60;
+                let bank = match self.kind {
+                    Kind::Mbc1 => {
+                        // 下位 5bit の 0→1 補正は上位ビット(0x60)と OR する前に行う必要がある
+                        // (実機仕様: 0x00/0x20/0x40/0x60 書き込みはそれぞれ 1/0x21/0x41/0x61 選択)。
+                        let mut low = self.rom_bank & 0x1F;
+                        if low == 0 {
+                            low = 1;
+                        }
+                        if self.rom.len() > 0x80000 {
+                            low | (((self.ram_bank as u16) << 5) & 0x60)
+                        } else {
+                            low
+                        }
                     }
-                    if bank == 0 {
-                        bank = 1;
+                    Kind::Mbc3 => {
+                        let bank = self.rom_bank & 0x7F;
+                        if bank == 0 {
+                            1
+                        } else {
+                            bank
+                        }
                     }
-                    let offset = bank as usize * 0x4000 + (addr as usize - 0x4000);
-                    if offset < self.rom.len() {
-                        self.rom[offset]
-                    } else {
-                        0xFF
-                    }
-                } else {
-                    self.rom.get(addr as usize).copied().unwrap_or(0xFF)
-                }
+                    // MBC5 のみバンク 0 も有効な値として扱う。
+                    Kind::Mbc5 => self.rom_bank & 0x1FF,
+                    Kind::RomOnly => return self.rom.get(addr as usize).copied().unwrap_or(0xFF),
+                };
+                let offset = bank as usize * 0x4000 + (addr as usize - 0x4000);
+                self.rom.get(offset).copied().unwrap_or(0xFF)
             }
 
-            0xA000..=0xBFFF => {
-                let ram_size = self.ram_size();
-                if self.is_mbc1() && self.ram_enabled && ram_size > 0 {
-                    let bank = if self.mode { self.ram_bank } else { 0 };
-                    let offset = bank as usize * 0x2000 + (addr as usize - 0xA000);
-                    if offset < ram_size {
-                        unsafe {
-                            core::ptr::read(
-                                (core::ptr::addr_of!(CART_RAM) as *const u8).add(offset),
-                            )
-                        }
-                    } else {
+            0xA000..=0xBFFF => match self.kind {
+                Kind::Mbc1 => {
+                    if !self.ram_enabled || self.ram_size == 0 {
                         0xFF
+                    } else {
+                        let bank = if self.mode { self.ram_bank } else { 0 };
+                        self.ram_read(bank as usize * 0x2000 + (addr as usize - 0xA000))
                     }
-                } else {
-                    0xFF
                 }
-            }
+                Kind::Mbc3 => {
+                    if !self.ram_enabled {
+                        0xFF
+                    } else {
+                        match self.ram_bank {
+                            0x00..=0x03 => {
+                                self.ram_read(self.ram_bank as usize * 0x2000 + (addr as usize - 0xA000))
+                            }
+                            0x08..=0x0C => 0x00, // RTC レジスタ（スタブ）
+                            _ => 0xFF,
+                        }
+                    }
+                }
+                Kind::Mbc5 => {
+                    if !self.ram_enabled || self.ram_size == 0 {
+                        0xFF
+                    } else {
+                        self.ram_read(self.ram_bank as usize * 0x2000 + (addr as usize - 0xA000))
+                    }
+                }
+                Kind::RomOnly => 0xFF,
+            },
 
             _ => 0xFF,
         }
     }
 
     fn write(&mut self, addr: u16, val: u8) {
-        if !self.is_mbc1() {
+        if self.kind == Kind::RomOnly {
             return;
         }
         match addr {
-            0x0000..=0x1FFF => {
-                self.ram_enabled = (val & 0x0F) == 0x0A;
+            0x0000..=0x1FFF => self.ram_enabled = (val & 0x0F) == 0x0A,
+            0x2000..=0x2FFF if self.kind == Kind::Mbc5 => {
+                self.rom_bank = (self.rom_bank & 0x100) | val as u16;
+            }
+            0x3000..=0x3FFF if self.kind == Kind::Mbc5 => {
+                self.rom_bank = (self.rom_bank & 0x0FF) | (((val & 0x01) as u16) << 8);
             }
             0x2000..=0x3FFF => {
-                let bank = val & 0x1F;
-                self.rom_bank = if bank == 0 { 1 } else { bank };
+                let mask = if self.kind == Kind::Mbc3 { 0x7F } else { 0x1F };
+                self.rom_bank = (val & mask) as u16;
             }
             0x4000..=0x5FFF => {
-                self.ram_bank = val & 0x03;
+                self.ram_bank = if self.kind == Kind::Mbc1 { val & 0x03 } else { val & 0x0F };
             }
             0x6000..=0x7FFF => {
-                self.mode = (val & 0x01) != 0;
+                if self.kind == Kind::Mbc1 {
+                    self.mode = (val & 0x01) != 0;
+                }
+                // MBC3: RTC ラッチ（未実装、no-op）
             }
-            0xA000..=0xBFFF => {
-                let ram_size = self.ram_size();
-                if self.ram_enabled && ram_size > 0 {
-                    let bank = if self.mode { self.ram_bank } else { 0 };
-                    let offset = bank as usize * 0x2000 + (addr as usize - 0xA000);
-                    if offset < ram_size {
-                        unsafe {
-                            core::ptr::write(
-                                (core::ptr::addr_of_mut!(CART_RAM) as *mut u8).add(offset),
-                                val,
-                            );
-                        }
+            0xA000..=0xBFFF => match self.kind {
+                Kind::Mbc1 => {
+                    if self.ram_enabled && self.ram_size > 0 {
+                        let bank = if self.mode { self.ram_bank } else { 0 };
+                        self.ram_write(bank as usize * 0x2000 + (addr as usize - 0xA000), val);
                     }
                 }
-            }
+                Kind::Mbc3 => {
+                    if self.ram_enabled && self.ram_bank <= 0x03 {
+                        self.ram_write(
+                            self.ram_bank as usize * 0x2000 + (addr as usize - 0xA000),
+                            val,
+                        );
+                    }
+                    // RTC レジスタ (0x08-0x0C) への書き込みはスタブのため無視
+                }
+                Kind::Mbc5 => {
+                    if self.ram_enabled && self.ram_size > 0 {
+                        self.ram_write(
+                            self.ram_bank as usize * 0x2000 + (addr as usize - 0xA000),
+                            val,
+                        );
+                    }
+                }
+                Kind::RomOnly => {}
+            },
             _ => {}
         }
     }
