@@ -1,0 +1,8 @@
+[package]
+name = "gba-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# no_std での浮動小数点関数（HLE BIOS の三角関数・平方根に使用）
+libm = "0.2"
