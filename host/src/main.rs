@@ -1,3 +1,4 @@
+mod gba_run;
 mod lcd;
 mod renderer;
 
@@ -17,6 +18,12 @@ pub fn main() {
     let headless = args.iter().any(|a| a == "--headless");
     let rom_path =
         args.iter().skip(1).find(|a| *a != "--headless").map(|s| s.as_str());
+
+    // .gba は GBA モードで起動（GB とはコア・表示・ループがすべて別）
+    if let Some(path) = rom_path.filter(|p| p.ends_with(".gba")) {
+        gba_run::run(path);
+        return;
+    }
 
     let bootrom = load_bootrom();
 
