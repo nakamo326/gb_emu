@@ -61,3 +61,14 @@ cargo check
 - **`TerminalRenderer`**（`renderer.rs`）: ASCIIアートでターミナル出力。`main.rs` でコメントアウト中。
 
 SDL2依存: macOSは `raw-window-handle` 機能、その他は静的リンク（`bundled`）を使用（`Cargo.toml` 参照）。
+
+## GBA エミュレーション（`gba/` = gba-core クレート）
+
+GB とは独立した no_std コア。`.gba` 拡張子の ROM を渡すと host が GBA モードで起動する（`host/src/gba_run.rs`）。
+
+- **CPU**（`gba/src/cpu/`）: ARM7TDMI。ARM/Thumb 両命令セット、モード別バンクレジスタ。パイプラインは「r15 = 実行中命令 + 8（Thumb は +4）」の規約で近似
+- **BIOS**: `gba_bios.bin`（16KB）があれば実 BIOS、なければ HLE（`cpu/swi.rs`。主要 SWI と IRQ ディスパッチを実装）
+- **PPU**（`gba/src/ppu.rs`）: BG モード 0–5、OBJ（アフィン含む）、ウィンドウ、ブレンディングをスキャンライン描画
+- **バス**（`gba/src/bus.rs`）: アドレス上位 8bit でディスパッチ。DMA 転送の実行もここ（借用の都合）
+- **未実装**: APU（サウンド）、Flash/EEPROM セーブ（SRAM のみ）、ウェイトステート精度、モザイク
+- デバッグ: `cargo run -p gba-core --release --example headless <rom.gba> [frames]` でヘッドレス実行 + PPM 出力
