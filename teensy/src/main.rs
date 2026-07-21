@@ -14,7 +14,7 @@ use bsp::board;
 #[allow(unused_imports)]
 use bsp::interrupt;
 
-use gb_core::{bootrom::Bootrom, gameboy::GameBoy, mmu::Mmu, platform::NullAudio};
+use gb_core::{bootrom::Bootrom, gameboy::GameBoy, mmu::Mmu};
 
 // --- USB シリアルログ ---
 struct UsbPollerCell(core::cell::UnsafeCell<Option<imxrt_log::Poller>>);
@@ -150,12 +150,13 @@ fn main() -> ! {
 
     let display = DmaDisplay::<St7789, _, _, _>::new(spi, dc, rst, dma_channel);
 
-    // ------- SAI1 オーディオ (MAX98357A, I2S) -------
-    // 既知の問題により無効化中: SAI1 を有効化するとランダムなタイミングで
-    // 画面が真っ黒になる (アンプ・カートリッジ回路の有無、初期化順序とは無関係)。
+    // ------- SAI1 オーディオ (MAX98357A/PCM5102A, I2S) -------
+    // 既知の問題: 有効化するとランダムなタイミングで画面が真っ黒になる未解決バグがある。
     // 詳細・調査経緯は docs/teensy_setup_guide.md の「既知の問題」節を参照。
-    let _ = sai1;
-    let audio = NullAudio;
+    let audio = audio::SaiAudio::new(sai1, pins.p7, pins.p23, pins.p26, pins.p27);
+    unsafe {
+        cortex_m::peripheral::NVIC::unmask(bsp::interrupt::SAI1);
+    }
 
     // ------- GB コア -------
 
@@ -178,11 +179,16 @@ fn main() -> ! {
     let mut gb = GameBoy::new(mmu, display, audio, input);
 
     // ------- メインループ (フレームペーシング) -------
-    // GB 1 フレーム = 70224 T-cycle。ARM クロック換算のフレーム周期 (約16.742ms) ごとに
-    // ループを同期させ、emu/描画がどれだけ速くても realtime (59.7fps) に固定する。
+    // 一次ペーシングはオーディオが担う: `SaiAudio::push()` がリングバッファ満杯時に
+    // ブロックするため、エミュレーションは SAI の実消費レート (≈44117 Hz、フレーム換算
+    // ≈59.75fps) に正確にロックされる。LCD オフ期間中 (frame_ready が来ない間) も効く。
+    // DWT の締切は名目フレーム周期より 5% 速いセーフティキャップに留め、通常は発動しない。
+    // 役割は (1) オーディオ停止時 (push がドロップ動作へ退避した場合) の暴走防止、
+    // (2) アンダーラン後にバッファを再充填する際の追い上げ速度の上限 (+5%)。
     use cortex_m::peripheral::DWT;
-    const FRAME_CYCLES: u32 = (board::ARM_FREQUENCY as u64 * 70224 / 4_194_304) as u32;
-    let mut next_deadline = DWT::cycle_count().wrapping_add(FRAME_CYCLES);
+    const FRAME_CYCLES_NOMINAL: u32 = (board::ARM_FREQUENCY as u64 * 70224 / 4_194_304) as u32;
+    const FRAME_CYCLES_CAP: u32 = (FRAME_CYCLES_NOMINAL as u64 * 100 / 105) as u32;
+    let mut next_deadline = DWT::cycle_count().wrapping_add(FRAME_CYCLES_CAP);
     // フレーム処理開始時刻 (ビジーウェイト解除直後)。実処理サイクル計測の基準。
     let mut frame_start = DWT::cycle_count();
 
@@ -191,18 +197,22 @@ fn main() -> ! {
 
         if r.frame_ready {
             let now = DWT::cycle_count();
-            // このフレームの実処理サイクル (step 群 + draw、待機を含まない) を記録。
-            // オーバーレイの2行目に負荷% とコマ落ち回数として表示される。
-            let work = now.wrapping_sub(frame_start);
-            gb.display_mut().record_work(work, FRAME_CYCLES);
+            // このフレームの実処理サイクル (step 群 + draw) を記録。オーディオペーシングの
+            // 待機時間は除外する。オーバーレイの2行目に負荷% とコマ落ち回数として表示される。
+            let work = now
+                .wrapping_sub(frame_start)
+                .saturating_sub(audio::SaiAudio::take_blocked_cycles());
+            gb.display_mut().record_work(work, FRAME_CYCLES_NOMINAL);
 
             if (now.wrapping_sub(next_deadline) as i32) >= 0 {
-                // 締切超過 (処理が予算を上回った) → 同期しなおしてバースト追い上げを防ぐ
-                next_deadline = now.wrapping_add(FRAME_CYCLES);
+                // 締切超過。オーディオペーシングが効いている通常運転では毎フレーム
+                // ここに入る (キャップは名目より速いため)。同期しなおすだけで良い。
+                next_deadline = now.wrapping_add(FRAME_CYCLES_CAP);
             } else {
-                // 締切まで待機して realtime に同期
+                // オーディオが仕事をしていない (停止 or バッファ再充填中) 場合のみ
+                // ここに来る。キャップ (+5%) まで待機して暴走を防ぐ。
                 while (DWT::cycle_count().wrapping_sub(next_deadline) as i32) < 0 {}
-                next_deadline = next_deadline.wrapping_add(FRAME_CYCLES);
+                next_deadline = next_deadline.wrapping_add(FRAME_CYCLES_CAP);
             }
             // 待機を終えた地点を次フレームの処理開始基準にする。
             frame_start = DWT::cycle_count();
