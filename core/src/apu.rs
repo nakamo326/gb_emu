@@ -677,6 +677,13 @@ pub struct Apu {
 
     // サンプリング（分数カウンタ方式）
     sample_frac: u32,
+
+    // ダウンサンプリング用のボックスフィルタ累積 (前回サンプル以降の mix() 出力の総和)。
+    // 瞬時値の間引きだと矩形波/ノイズの高調波が折り返してエイリアシング (耳障りな
+    // ざらつき) になるため、サンプル間の全 M-cycle を平均してから出力する。
+    acc_l: f32,
+    acc_r: f32,
+    acc_n: u32,
 }
 
 impl Apu {
@@ -692,6 +699,9 @@ impl Apu {
             fs_counter: 0,
             fs_step: 0,
             sample_frac: 0,
+            acc_l: 0.0,
+            acc_r: 0.0,
+            acc_n: 0,
         }
     }
 
@@ -699,6 +709,9 @@ impl Apu {
     pub fn emulate_cycle(&mut self) -> Option<(f32, f32)> {
         if !self.powered {
             // 無音サンプルでカウンタを回す
+            self.acc_l = 0.0;
+            self.acc_r = 0.0;
+            self.acc_n = 0;
             self.sample_frac += SAMPLE_RATE;
             if self.sample_frac >= CPU_M_CYCLES_PER_SEC {
                 self.sample_frac -= CPU_M_CYCLES_PER_SEC;
@@ -720,12 +733,22 @@ impl Apu {
         self.ch3.tick();
         self.ch4.tick();
 
-        // 3. サンプリング判定
+        // 3. ミキサー出力を毎サイクル積算 (ボックスフィルタ。struct のコメント参照)
+        let (l, r) = self.mix();
+        self.acc_l += l;
+        self.acc_r += r;
+        self.acc_n += 1;
+
+        // 4. サンプリング判定: 前回サンプル以降の平均を出力する
         self.sample_frac += SAMPLE_RATE;
         if self.sample_frac >= CPU_M_CYCLES_PER_SEC {
             self.sample_frac -= CPU_M_CYCLES_PER_SEC;
-            let (l, r) = self.mix();
-            return Some((l, r));
+            let n = self.acc_n as f32;
+            let out = (self.acc_l / n, self.acc_r / n);
+            self.acc_l = 0.0;
+            self.acc_r = 0.0;
+            self.acc_n = 0;
+            return Some(out);
         }
         None
     }
