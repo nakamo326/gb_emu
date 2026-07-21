@@ -279,15 +279,6 @@ where
                 self.drops = self.drop_count;
                 self.fps_dirty = true;
             }
-            log::info!(
-                "FPS:{}.{} peak:{}% avg:{}% drops:{}",
-                self.fps_tenths / 10,
-                self.fps_tenths % 10,
-                self.peak_pct,
-                self.avg_pct,
-                self.drops,
-            );
-
             self.work_max = 0;
             self.work_sum = 0;
             self.work_samples = 0;
@@ -486,13 +477,10 @@ where
 
         // 1.5. FPS を更新。値が変わった時 (≒毎秒1回) だけ余白に PIO 描画する。
         //      ここは GB の DMA が走っていない区間なので SPI バスは空いている。
+        // 検証のため一時的に PIO 描画 (render_overlay) を無効化 (2026-07-09)。
+        // 音切れ・全体的な遅延の原因がここにあるかどうかを切り分けるため。
         self.update_fps();
         if self.fps_dirty {
-            let ov_start = DWT::cycle_count();
-            self.render_overlay();
-            let ov_us = DWT::cycle_count().wrapping_sub(ov_start)
-                / (bsp::board::ARM_FREQUENCY / 1_000_000);
-            log::info!("overlay: {}us", ov_us);
             self.fps_dirty = false;
         }
 
