@@ -27,6 +27,8 @@ pub struct GameBoy<C: CartridgeBus, D: Display, A: AudioSink, I: InputSource> {
     display: D,
     audio: A,
     input: I,
+    /// CGB ダブルスピード時に PPU/APU を 1 step おきに進めるための位相フラグ。
+    av_phase: bool,
 }
 
 impl<C: CartridgeBus, D: Display, A: AudioSink, I: InputSource> GameBoy<C, D, A, I> {
@@ -48,7 +50,7 @@ impl<C: CartridgeBus, D: Display, A: AudioSink, I: InputSource> GameBoy<C, D, A,
                 mmu.apply_dmg_init();
             }
         }
-        Self { cpu, mmu, display, audio, input }
+        Self { cpu, mmu, display, audio, input, av_phase: false }
     }
 
     /// MMU への不変参照（test-harness の出力監視等に使用）。
@@ -77,9 +79,18 @@ impl<C: CartridgeBus, D: Display, A: AudioSink, I: InputSource> GameBoy<C, D, A,
 
         self.cpu.emulate_cycle(&mut self.mmu);
 
-        // タイマー割り込み
+        // タイマー割り込み (タイマーは CPU クロック同期なので毎 step 進める。
+        // ダブルスピード時は実時間比 2 倍になり実機と一致する)
         if self.mmu.timer.emulate_cycle() {
             self.mmu.if_ |= 0x04;
+        }
+
+        // PPU/APU のクロックは実機ではダブルスピード切替の影響を受けない。
+        // ダブルスピード時の 1 step は実時間で半 M-cycle 相当なので、1 step おきに進める。
+        self.av_phase = !self.av_phase;
+        if self.mmu.double_speed() && self.av_phase {
+            result.double_speed = true;
+            return result;
         }
 
         // APU サンプル生成
