@@ -309,6 +309,10 @@ GPIO バスから都度読み出すため ROM バッファは不要で、RAM を
 
 ### SAI1 オーディオ有効化時に画面が真っ黒になる (未解決, 2026-07-05)
 
+> **最新の調査記録は [blackscreen_investigation.md](blackscreen_investigation.md) を参照。**
+> 真因の切り分けが進み (SAI/LCD の DMA バス競合、TEF/REF=0 の DC ずれ)、対策一式は実験ブランチ
+> `experiment/blackscreen-sai-dma` に退避済み。以下の本文は 2026-07-09 時点の古い仮説です。
+
 `teensy/src/audio.rs` の `SaiAudio` (SAI1 + MAX98357A/PCM5102A 向け I2S 出力) を有効にすると、
 起動から数秒〜数十秒のランダムなタイミングでディスプレイが真っ黒になる。音声出力自体は
 黒画面になった後も継続する。**現在 `main.rs` では `SaiAudio` を使わず `NullAudio` にフォール
