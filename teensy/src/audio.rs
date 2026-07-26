@@ -114,6 +114,21 @@ impl SaiAudio {
             tx.write_frame(0, [0u16, 0u16]);
         }
 
+        // [対策検証] SAI 出力ピンのエッジを鈍らせ、BCLK クロストークを源で低減する。
+        // sai::prepare は mux/daisy のみ設定し SW_PAD_CTL は既定値(強駆動・SPEED中)のまま。
+        // ここで駆動強度を最弱(DSE=1=150Ω)・SPEED 低・スルーレート遅に落とす。BCLK は
+        // 1.4MHz なのでエッジが緩くても I2S 動作・音質に影響しない。結合は dV/dt に比例する
+        // ため、エッジを鈍らせれば DC 線に乗るグリッチが閾値を越えにくくなる。
+        //   pin26 BCLK=GPIO_AD_B1_14(0x401F_8324), pin27 LRCLK=GPIO_AD_B1_15(0x401F_8328),
+        //   pin7 DATA=GPIO_B1_01(0x401F_8370)
+        //   値 0x0008: DSE=1(bit3), SPEED=0, SRE=0(遅スルー), keeper/pull なし
+        unsafe {
+            const SOFT: u32 = 0x0000_0008;
+            core::ptr::write_volatile(0x401F_8324 as *mut u32, SOFT); // BCLK
+            core::ptr::write_volatile(0x401F_8328 as *mut u32, SOFT); // LRCLK
+            core::ptr::write_volatile(0x401F_8370 as *mut u32, SOFT); // DATA
+        }
+
         // FIFO が枯渇しかけたら割り込みで補充する
         tx.set_interrupts(Interrupts::FIFO_REQUEST);
         tx.set_enable(true);
