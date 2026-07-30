@@ -62,6 +62,9 @@ pub struct DmaDisplay<P, SPI, DC, RST> {
     channel: Channel,
     back: usize,
     in_flight: bool,
+    /// パネル側のウィンドウが GB 描画領域に設定済みか。
+    /// true の間は毎フレーム RAMWR だけを送り、CASET/RASET を省略する。
+    window_set: bool,
     // --- FPS 計測 ---
     frame_count: u32,      // 計測ウィンドウ内の描画フレーム数
     last_fps_cycle: u32,   // 直近のウィンドウ開始時の DWT サイクル
@@ -94,6 +97,7 @@ where
             channel,
             back: 0,
             in_flight: false,
+            window_set: false,
             frame_count: 0,
             last_fps_cycle: DWT::cycle_count(),
             fps_tenths: 0,
@@ -148,6 +152,7 @@ where
     }
 
     fn clear_screen(&mut self) {
+        self.window_set = false;
         self.cmd(CASET);
         self.data_pio(&[0, 0, ((P::WIDTH - 1) >> 8) as u8, (P::WIDTH - 1) as u8]);
         self.cmd(RASET);
@@ -168,6 +173,7 @@ where
     /// 描画ウィンドウ (CASET/RASET) を設定し RAMWR を発行する。
     /// `x`/`y` はパネルオフセットを含まない論理座標。
     fn set_rect(&mut self, x: u16, y: u16, w: u16, h: u16) {
+        self.window_set = false;
         let x0 = x + P::COL_OFFSET;
         let y0 = y + P::ROW_OFFSET;
         let x1 = x0 + w - 1;
@@ -184,6 +190,25 @@ where
         let x0 = (P::WIDTH - GB_W as u16) / 2;
         let y0 = (P::HEIGHT - GB_H as u16) / 2;
         self.set_rect(x0, y0, GB_W as u16, GB_H as u16);
+        self.window_set = true;
+    }
+
+    /// GB 領域へのバルク転送を開始する準備。ウィンドウが既に設定済みなら
+    /// RAMWR のみを送る (ST7789 は RAMWR 再発行でアドレスポインタが
+    /// ウィンドウ先頭に戻る)。
+    ///
+    /// CASET パラメータには x0 = (240-160)/2 = 40 = 0x28 が含まれる。これは
+    /// DISPOFF と同値で、かつ DC を low→high に戻した直後 (SAI からの結合
+    /// グリッチで DC が low 側へ引き戻されうる整定期間) に送出されるため、
+    /// ランダムな画面消灯の原因になっていた。ウィンドウは毎フレーム同一なので
+    /// 送り直す必要はなく、露出を起動時の 1 回だけに削る。
+    /// 詳細: docs/blackscreen_investigation.md
+    fn begin_frame_window(&mut self) {
+        if self.window_set {
+            self.cmd(RAMWR);
+        } else {
+            self.set_window();
+        }
     }
 
     /// 1 文字を PIO (ブロッキング) で描画する。GB の DMA が走っていない
@@ -488,8 +513,8 @@ where
         let buf = unsafe { &mut FB[self.back] };
         Self::fill_buffer(buf, pixels);
 
-        // 3. ウィンドウ設定コマンドを PIO (ブロッキング) で送信
-        self.set_window();
+        // 3. ウィンドウ設定 / RAMWR を PIO (ブロッキング) で送信
+        self.begin_frame_window();
 
         // 4. DC を HIGH にしてデータモードに切り替え
         let _ = self.dc.set_high();
