@@ -17,13 +17,16 @@ HEX := target/$(TARGET)/release/gb-teensy.hex
 # 上書き例: make ROM=../blargg/cgb-acid2.gbc build
 ROM ?= $(abspath ../roms/game.gb)
 
+# 実カートリッジから読む場合: make FEATURES=real-cart build  (ROM は無視される)
+FEATURES ?=
+
 .PHONY: build build-debug hex flash deploy clean
 
 build:
-	GB_ROM="$(ROM)" RUSTC="$(RUSTC)" $(CARGO) build --target $(TARGET) --release
+	GB_ROM="$(ROM)" RUSTC="$(RUSTC)" $(CARGO) build --target $(TARGET) --release --features "$(FEATURES)"
 
 build-debug:
-	GB_ROM="$(ROM)" RUSTC="$(RUSTC)" $(CARGO) build --target $(TARGET)
+	GB_ROM="$(ROM)" RUSTC="$(RUSTC)" $(CARGO) build --target $(TARGET) --features "$(FEATURES)"
 
 hex: build
 	LD_LIBRARY_PATH="$(RUSTC_SYSROOT)/lib" $(OBJCOPY) -O ihex $(ELF) $(HEX)

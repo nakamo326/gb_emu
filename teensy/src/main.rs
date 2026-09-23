@@ -2,9 +2,11 @@
 #![no_main]
 
 mod audio;
+#[cfg(feature = "real-cart")]
 mod cartridge;
 mod display;
 mod input;
+#[cfg(not(feature = "real-cart"))]
 mod sdcard;
 
 use teensy4_bsp as bsp;
@@ -14,7 +16,7 @@ use bsp::board;
 #[allow(unused_imports)]
 use bsp::interrupt;
 
-use gb_core::{bootrom::Bootrom, gameboy::GameBoy, mmu::Mmu};
+use gb_core::{bootrom::Bootrom, gameboy::GameBoy, mmu::Mmu, platform::CartridgeBus};
 
 // --- USB シリアルログ ---
 struct UsbPollerCell(core::cell::UnsafeCell<Option<imxrt_log::Poller>>);
@@ -38,7 +40,6 @@ fn SAI1() {
 use display::panel::St7789;
 use display::DmaDisplay;
 use input::GpioInput;
-use sdcard::FlashCart;
 
 /// Teensy 4.1 全ピン割り当て (確定):
 ///
@@ -48,8 +49,9 @@ use sdcard::FlashCart;
 /// │ D0-D7 = 14,15,40,41,17,16,22,23     (GPIO1[18-25] 連続・高速読出) │
 /// │ A0-A9 = 19,18,38,39,24,25,0,1,20,21 (全て GPIO1。bit は非連続)    │
 /// │ A10-A14 = 2,3,4,5,6                  (GPIO4/GPIO2)               │
+/// │ A15 = 8 (GPIO2[16]。ディスプレイ RST から転用)                  │
 /// │ /RD=33  /WR=34  /CS=35   /RESET=37 (GPIO2[19], MBC リセット用)  │
-/// │   ※ A15 は不使用 (ROM 域は常に 0、外部RAM は /CS で選択)         │
+/// │   ※ D7(p23) は SAI1_MCLK と共用。オーディオ初期化後に GPIO へ戻す │
 /// │   ※ /RESET は電源投入後に L→H パルスで MBC バンクレジスタを初期化 │
 /// ├ Audio (SAI1 TX / PCM5102) ─────────────────────────────────────┤
 /// │ TX_DATA=7   TX_BCLK=26   TX_SYNC=27                             │
@@ -59,16 +61,24 @@ use sdcard::FlashCart;
 /// └────────────────────────────────────────────────────────────────┘
 ///
 /// 実機検証で判明した配線の重要事項 (詳細は docs/teensy_setup_guide.md):
-///   - 単一 SPI デバイスなら CS→GND, RESET→3.3V 固定が最も確実 (その場合 p10/p8 は未使用)。
+///   - 単一 SPI デバイスなら CS→GND, RESET→3.3V 固定が最も確実 (p8 は A15 に転用済み)。
 ///   - GB カートリッジは 5V 系 → D/A/制御線は 74AHCT245 等でレベル変換が必要。
 ///
-/// ROM は Flash に埋め込み (include_bytes!)。
+/// ROM の供給元は feature で切り替える:
+///   - デフォルト: Flash に埋め込んだ ROM (include_bytes!)。
+///   - `real-cart`: GPIO バス経由で実カートリッジを読む (`make FEATURES=real-cart build`)。
 /// SDカード対応は docs/teensy_setup_guide.md を参照。
 
-// ROM は Flash に埋め込む。
 // デフォルトは roms/game.gb。GB_ROM 環境変数または Makefile の ROM 変数で上書き可能:
 //   make ROM=/path/to/game.gbc build
+#[cfg(not(feature = "real-cart"))]
 static ROM: &[u8] = include_bytes!(env!("GB_ROM_PATH"));
+
+/// ヘッダチェックサム (0x14D) を検証する。実カートでは未挿入・配線不良・タイミング不足の検出に使う。
+fn header_checksum_ok(cart: &impl CartridgeBus) -> bool {
+    let sum = (0x134..=0x14C).fold(0u8, |x, a| x.wrapping_sub(cart.read(a)).wrapping_sub(1));
+    sum == cart.read(0x14D)
+}
 
 #[bsp::rt::entry]
 fn main() -> ! {
@@ -76,6 +86,8 @@ fn main() -> ! {
         usb,
         lpspi4,
         sai1,
+        #[cfg(feature = "real-cart")]
+        mut gpio1,
         mut gpio2,
         mut gpio3,
         mut gpio4,
@@ -104,9 +116,6 @@ fn main() -> ! {
         *USB_POLLER.0.get() = Some(poller);
         cortex_m::peripheral::NVIC::unmask(bsp::interrupt::USB_OTG1);
     }
-
-    // ------- ROM (Flash 埋め込み) -------
-    let cart = FlashCart::new(ROM);
 
     // ------- ILI9341 ディスプレイ (LPSPI4) -------
     let spi: board::Lpspi4 = board::lpspi(
@@ -166,15 +175,65 @@ fn main() -> ! {
         &mut gpio2, &mut gpio3, &mut gpio4, pins.p28, pins.p29, pins.p30, pins.p31, pins.p32,
         pins.p36,
     );
-    let mmu = Mmu::new(bootrom, cart);
-    let cgb_flag = ROM.get(0x143).copied().unwrap_or(0);
-    let cart_type = ROM.get(0x147).copied().unwrap_or(0);
-    log::info!(
-        "ROM: cgb_flag=0x{:02X} cart_type=0x{:02X} len={}",
-        cgb_flag,
-        cart_type,
-        ROM.len()
+
+    // ------- カートリッジ -------
+    #[cfg(not(feature = "real-cart"))]
+    let cart = sdcard::FlashCart::new(ROM);
+
+    // p23 (D7) は SaiAudio::new() が SAI1_MCLK として IOMUXC を設定済み。MCLK は未配線のため、
+    // ここで GPIO に切り替え直してデータバスとして使う (オーディオより後に初期化する理由)。
+    #[cfg(feature = "real-cart")]
+    let cart = cartridge::GpioCart::new(
+        &mut gpio1,
+        &mut gpio2,
+        &mut gpio4,
+        cartridge::CartPins {
+            d0: pins.p14,
+            d1: pins.p15,
+            d2: pins.p40,
+            d3: pins.p41,
+            d4: pins.p17,
+            d5: pins.p16,
+            d6: pins.p22,
+            // Safety: SAI ドライバは MCLK ピンを保持するだけで以後触らない。
+            d7: unsafe { bsp::pins::t41::P23::new() },
+            a0: pins.p19,
+            a1: pins.p18,
+            a2: pins.p38,
+            a3: pins.p39,
+            a4: pins.p24,
+            a5: pins.p25,
+            a6: pins.p0,
+            a7: pins.p1,
+            a8: pins.p20,
+            a9: pins.p21,
+            a10: pins.p2,
+            a11: pins.p3,
+            a12: pins.p4,
+            a13: pins.p5,
+            a14: pins.p6,
+            a15: pins.p8,
+            n_rd: pins.p33,
+            n_wr: pins.p34,
+            n_cs: pins.p35,
+            n_reset: pins.p37,
+        },
     );
+
+    let checksum_ok = header_checksum_ok(&cart);
+    log::info!(
+        "cart: cgb_flag=0x{:02X} cart_type=0x{:02X} rom_size=0x{:02X} header_checksum={}",
+        cart.read(0x143),
+        cart.read(0x147),
+        cart.read(0x148),
+        if checksum_ok { "ok" } else { "NG" }
+    );
+    #[cfg(feature = "real-cart")]
+    if !checksum_ok {
+        panic!("cartridge header checksum mismatch (not inserted, wiring, or bus timing)");
+    }
+
+    let mmu = Mmu::new(bootrom, cart);
     let mut gb = GameBoy::new(mmu, display, audio, input);
 
     // ------- メインループ (フレームペーシング) -------

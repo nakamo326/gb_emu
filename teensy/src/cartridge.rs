@@ -1,172 +1,239 @@
-use bsp::hal::gpio::{Input, Output, Port};
+use bsp::hal::gpio::Port;
+use bsp::pins::t41::{
+    P0, P1, P2, P3, P4, P5, P6, P8, P14, P15, P16, P17, P18, P19, P20, P21, P22, P23, P24, P25,
+    P33, P34, P35, P37, P38, P39, P40, P41,
+};
+use bsp::ral::{self, gpio::{GPIO1, GPIO2, GPIO4}};
 use cortex_m::asm;
 use gb_core::platform::CartridgeBus;
 use teensy4_bsp as bsp;
 
-/// 実 GB ROM カートリッジ GPIO バスドライバ。
+/// 実 GB カートリッジ GPIO バスドライバ。
 ///
 /// # ピン割り当て (Teensy 4.1, 確定)
 ///
-/// | 信号    | Teensy ピン | GPIO ポート / ビット | 備考             |
-/// |--------|------------|-------------------|-----------------|
-/// | D0     | 14         | GPIO1[18]         | GPIO_AD_B1_02   |
-/// | D1     | 15         | GPIO1[19]         | GPIO_AD_B1_03   |
-/// | D2     | 40         | GPIO1[20]         | GPIO_AD_B1_04   |
-/// | D3     | 41         | GPIO1[21]         | GPIO_AD_B1_05   |
-/// | D4     | 17         | GPIO1[22]         | GPIO_AD_B1_06   |
-/// | D5     | 16         | GPIO1[23]         | GPIO_AD_B1_07   |
-/// | D6     | 22         | GPIO1[24]         | GPIO_AD_B1_08   |
-/// | D7     | 23         | GPIO1[25]         | GPIO_AD_B1_09   |
-/// | A0     | 19         | GPIO1[16]         | GPIO_AD_B1_00   |
-/// | A1     | 18         | GPIO1[17]         | GPIO_AD_B1_01   |
-/// | A2     | 38         | GPIO1[28]         | GPIO_AD_B1_12   |
-/// | A3     | 39         | GPIO1[29]         | GPIO_AD_B1_13   |
-/// | A4     | 24         | GPIO1[12]         | GPIO_AD_B0_12   |
-/// | A5     | 25         | GPIO1[13]         | GPIO_AD_B0_13   |
-/// | A6     | 0          | GPIO1[3]          | GPIO_AD_B0_03   |
-/// | A7     | 1          | GPIO1[2]          | GPIO_AD_B0_02   |
-/// | A8     | 20         | GPIO1[26]         | GPIO_AD_B1_10   |
-/// | A9     | 21         | GPIO1[27]         | GPIO_AD_B1_11   |
-/// | A10    | 2          | GPIO4             | GPIO_EMC_04     |
-/// | A11    | 3          | GPIO4             | GPIO_EMC_05     |
-/// | A12    | 4          | GPIO4             | GPIO_EMC_06     |
-/// | A13    | 5          | GPIO4             | GPIO_EMC_08     |
-/// | A14    | 6          | GPIO2[10]         | GPIO_B0_10      |
-/// | /RD    | 33         | GPIO4[7]          | GPIO_EMC_07。74AHCT245 DIR にも直結（双方向バス制御） |
-/// | /WR    | 34         | GPIO2[28]         | GPIO_B1_12 (t41)|
-/// | /CS    | 35         | GPIO2[29]         | GPIO_B1_13 (t41)|
-/// | /RESET | 37         | GPIO2[19]         | GPIO_B1_03 (t41)。電源投入後にリセットパルスを与える |
-///
-/// # アドレス出力の注意
-///
-/// - A0-A9 は全て GPIO1 に載るが、ビットは非連続 (bit 2,3,12,13,16,17,26,27,28,29)。
-///   1 回の DR 書き込みでまとめて出すには各ビットへ散らす (scatter) 処理が必要。
-/// - A10-A14 は GPIO4/GPIO2 に分散するため別途セットする。
-/// - A15 は不使用: ROM 域 (0x0000-0x7FFF) では常に 0、外部 RAM (0xA000-0xBFFF) は
-///   /CS で選択する (GB カート実機と同じ)。read/write 時に対象域に応じて /RD/-/WR/-/CS
-///   を使い分けること。
+/// | 信号    | Teensy ピン | GPIO ポート / ビット | 備考 |
+/// |--------|------------|-------------------|-----|
+/// | D0-D7  | 14,15,40,41,17,16,22,23 | GPIO1[18-25] | 連続。D7(p23) は SAI1_MCLK と共用 (下記) |
+/// | A0-A9  | 19,18,38,39,24,25,0,1,20,21 | GPIO1[16,17,28,29,12,13,3,2,26,27] | 非連続 |
+/// | A10-A13| 2,3,4,5    | GPIO4[4,5,6,8]    | |
+/// | A14    | 6          | GPIO2[10]         | |
+/// | A15    | 8          | GPIO2[16]         | ディスプレイ RST から転用 (RST は 3.3V 固定) |
+/// | /RD    | 33         | GPIO4[7]          | 74AHCT245 (データバス) の DIR にも直結 |
+/// | /WR    | 34         | GPIO2[29]         | GPIO_B1_13 |
+/// | /CS    | 35         | GPIO2[28]         | GPIO_B1_12。0xA000-0xBFFF (外部 RAM) でアサート |
+/// | /RESET | 37         | GPIO2[19]         | 初期化時に L→H パルスで MBC を初期化 |
 ///
 /// # 配線の注意
 ///
-/// - GB カートリッジは DMG・GBC ともに 5V 系（3.3V に変わるのは GBA から）。
-///   Teensy 4.1 は 3.3V のため、74AHCT245 ×4 でレベル変換する。データバスは双方向 245 ×1 を
-///   使い、DIR ピンに /RD を直結して向きを切り替える（詳細: docs/hardware_decisions_levelshift.md）。
-/// - /RESET は pin 37 (GPIO2[19]) から制御する。電源投入後に LOW→HIGH のリセットパルスを与え、
-///   MBC のバンクレジスタを初期化する（3.3V 固定では RomOnly しか安定しない）。
-/// - 位相クロック(CLK)/AUDIO_IN は未接続でよい。
-/// - IOMUXC は事前に `gpio_port.output(pin)` / `.input(pin)` で GPIO モードに設定すること。
+/// - GB カートリッジは 5V 系。74AHCT245 ×4 でレベル変換する (docs/hardware_decisions_levelshift.md)。
+/// - A15 を省略すると MBC が外部 RAM アクセスを ROM 域 (レジスタ書き込み・ROM 選択) と
+///   誤認するため、A15 は必須。
+/// - CLK / AUDIO_IN は未接続でよい。
+pub struct GpioCart {
+    gpio1: GPIO1,
+    gpio2: GPIO2,
+    gpio4: GPIO4,
+}
 
-/// D0-D7 は GPIO1 ビット 18-25 に連続配置
+/// 信号名で束ねたカートリッジ用ピン。
+pub struct CartPins {
+    pub d0: P14,
+    pub d1: P15,
+    pub d2: P40,
+    pub d3: P41,
+    pub d4: P17,
+    pub d5: P16,
+    pub d6: P22,
+    pub d7: P23,
+    pub a0: P19,
+    pub a1: P18,
+    pub a2: P38,
+    pub a3: P39,
+    pub a4: P24,
+    pub a5: P25,
+    pub a6: P0,
+    pub a7: P1,
+    pub a8: P20,
+    pub a9: P21,
+    pub a10: P2,
+    pub a11: P3,
+    pub a12: P4,
+    pub a13: P5,
+    pub a14: P6,
+    pub a15: P8,
+    pub n_rd: P33,
+    pub n_wr: P34,
+    pub n_cs: P35,
+    pub n_reset: P37,
+}
+
 const DATA_SHIFT: u32 = 18;
 const DATA_MASK: u32 = 0xFF << DATA_SHIFT;
 
-// TODO: アドレス出力を確定ピン配へ実装すること (上のピン表参照)。
-//   - A0-A9 は GPIO1 の非連続ビット {2,3,12,13,16,17,26,27,28,29} に散らす (scatter)。
-//   - A10-A14 は GPIO4/GPIO2 (pin 2,3,4,5,6) に別途セットする。
-//   - A15 は不使用。下の ADDR_MASK は旧仮実装 (GPIO1 bit 0-15 直接) のままなので要置換。
-// TODO: /RESET (pin 37 = GPIO2[19]) の Output を保持し、new() で電源投入後に
-//   LOW→HIGH のリセットパルスを与えること (MBC バンクレジスタ初期化)。
-//     reset_pin.clear(); asm::delay(600_000 /* 1ms @600MHz */); reset_pin.set();
-const ADDR_MASK: u32 = 0x0000_FFFF;
+/// A0-A9 → GPIO1 のビット位置
+const A0_A9_BITS: [u32; 10] = [16, 17, 28, 29, 12, 13, 3, 2, 26, 27];
+/// A10-A13 → GPIO4 のビット位置
+const A10_A13_BITS: [u32; 4] = [4, 5, 6, 8];
+/// A14, A15 → GPIO2 のビット位置
+const A14_A15_BITS: [u32; 2] = [10, 16];
 
-/// /RD = GPIO4 bit 7 (pin 33 = GPIO_EMC_07)
-const N_RD_OFFSET: u32 = 7;
-/// /WR = GPIO2 bit 28 (pin 34 t41 = GPIO_B1_12 → GPIO2[28])
-const N_WR_OFFSET: u32 = 28;
-/// /CS = GPIO2 bit 29 (pin 35 t41 = GPIO_B1_13 → GPIO2[29])。外部 RAM (0xA000-0xBFFF) で使用。
-/// TODO: /CS の Output を保持し、RAM 域アクセス時にアサートする実装を追加すること。
-const _N_CS_OFFSET: u32 = 29;
+const GPIO1_ADDR_MASK: u32 = scatter(0xFFFF, 0, &A0_A9_BITS);
+const GPIO4_ADDR_MASK: u32 = scatter(0xFFFF, 10, &A10_A13_BITS);
+const GPIO2_ADDR_MASK: u32 = scatter(0xFFFF, 14, &A14_A15_BITS);
 
-/// ROM アクセスタイム待ち ≥ 150 ns @ 600 MHz ≈ 90 cycles
-const ACCESS_DELAY: u32 = 90;
+const N_RD: u32 = 1 << 7; // GPIO4
+const N_WR: u32 = 1 << 29; // GPIO2
+const N_CS: u32 = 1 << 28; // GPIO2
+const N_RESET: u32 = 1 << 19; // GPIO2
 
-pub struct GpioCart {
-    /// データバスの方向切り替えに使用する Port<1>
-    data_port: Port<1>,
-    /// /RD 制御 (GPIO4, &'static RegisterBlock を保持)
-    n_rd: Output<()>,
-    /// /WR 制御 (GPIO2, &'static RegisterBlock を保持)
-    n_wr: Output<()>,
+/// /RD または /WR をアサートしてからデータが確定するまでの待ち (≈300ns @600MHz)。
+/// ROM のアクセスタイム (150ns 前後) ぎりぎりには詰めていない: 245 を往復する伝搬遅延と
+/// MBC のデコード遅延の分を見込んだ余裕値。実機で詰めるなら負荷 % を見ながら縮める。
+const ACCESS_DELAY: u32 = 180;
+
+/// /RESET の L 保持時間と解除後の安定待ち (1ms @600MHz)。
+const RESET_DELAY: u32 = 600_000;
+
+/// `addr` のビット `first..` を、`gpio_bits` で指定した GPIO ビット位置へ散らす。
+const fn scatter(addr: u16, first: u32, gpio_bits: &[u32]) -> u32 {
+    let mut out = 0;
+    let mut i = 0;
+    while i < gpio_bits.len() {
+        if addr & (1 << (first + i as u32)) != 0 {
+            out |= 1 << gpio_bits[i];
+        }
+        i += 1;
+    }
+    out
+}
+
+/// `mask` 内のビットを `bits` の値にする。DR の read-modify-write を避け、
+/// 同じポートの他のピン (ディスプレイ DC、ボタン走査線) を割り込みと競合させない。
+macro_rules! put_bits {
+    ($gpio:expr, $mask:expr, $bits:expr) => {{
+        ral::write_reg!(ral::gpio, $gpio, DR_CLEAR, $mask & !$bits);
+        ral::write_reg!(ral::gpio, $gpio, DR_SET, $bits);
+    }};
 }
 
 impl GpioCart {
-    /// GPIO カートリッジバスを構築する。
+    /// ピンを GPIO に設定し、カートリッジにリセットパルスを与える。
     ///
-    /// # Safety
-    ///
-    /// 呼び出し前に以下を保証すること:
-    /// 1. `board::t41()` によるクロックゲート・電源設定の完了
-    /// 2. データバスピン (D0-D7)、アドレスバスピン (A0-A15)、制御ピン (/RD, /WR) に対して
-    ///    `gpio_port.output(pin)` を呼び IOMUXC を GPIO モードに設定
-    /// 3. `gpio4` および `gpio2` は本関数への移動後に別のコードから使用しないこと
-    pub unsafe fn new(mut data_port: Port<1>, mut gpio4: Port<4>, mut gpio2: Port<2>) -> Self {
-        // アドレスバス A0-A15 を出力に設定 (GPIO1 bit 0-15)
-        for bit in 0..16u32 {
-            let _ = Output::<()>::without_pin(&mut data_port, bit);
-        }
+    /// `pins.d7` (p23) は SAI1 の MCLK にも割り当てられているため、
+    /// オーディオ初期化 **後** に呼んで GPIO へ切り替え直すこと。
+    pub fn new(
+        gpio1: &mut Port<1>,
+        gpio2: &mut Port<2>,
+        gpio4: &mut Port<4>,
+        pins: CartPins,
+    ) -> Self {
+        // Safety: 以後このドライバは DR_SET/DR_CLEAR/GDIR/PSR の担当ビットしか触らない。
+        let cart = unsafe {
+            Self {
+                gpio1: GPIO1::instance(),
+                gpio2: GPIO2::instance(),
+                gpio4: GPIO4::instance(),
+            }
+        };
 
-        // データバス D0-D7 を入力に設定 (デフォルト状態)
-        for bit in DATA_SHIFT..DATA_SHIFT + 8 {
-            let _ = Input::<()>::without_pin(&mut data_port, bit);
-        }
+        // 出力へ切り替えた瞬間に制御線が L (アサート) で出ないよう、先に H を書いておく。
+        // /RESET だけはここで L にしてリセットを開始する。
+        ral::write_reg!(ral::gpio, cart.gpio4, DR_SET, N_RD);
+        ral::write_reg!(ral::gpio, cart.gpio2, DR_SET, N_WR | N_CS);
+        ral::write_reg!(ral::gpio, cart.gpio2, DR_CLEAR, N_RESET);
 
-        // /RD = 出力・非アサート (HIGH)
-        let n_rd = Output::<()>::without_pin(&mut gpio4, N_RD_OFFSET);
-        n_rd.set();
+        // output()/input() は IOMUXC を GPIO モードに設定する。戻り値のハンドルは
+        // 保持しない (以後はビットマスクでまとめて操作する)。
+        let CartPins {
+            d0, d1, d2, d3, d4, d5, d6, d7,
+            a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15,
+            n_rd, n_wr, n_cs, n_reset,
+        } = pins;
+        gpio1.input(d0);
+        gpio1.input(d1);
+        gpio1.input(d2);
+        gpio1.input(d3);
+        gpio1.input(d4);
+        gpio1.input(d5);
+        gpio1.input(d6);
+        gpio1.input(d7);
+        gpio1.output(a0);
+        gpio1.output(a1);
+        gpio1.output(a2);
+        gpio1.output(a3);
+        gpio1.output(a4);
+        gpio1.output(a5);
+        gpio1.output(a6);
+        gpio1.output(a7);
+        gpio1.output(a8);
+        gpio1.output(a9);
+        gpio4.output(a10);
+        gpio4.output(a11);
+        gpio4.output(a12);
+        gpio4.output(a13);
+        gpio2.output(a14);
+        gpio2.output(a15);
+        gpio4.output(n_rd);
+        gpio2.output(n_wr);
+        gpio2.output(n_cs);
+        gpio2.output(n_reset);
 
-        // /WR = 出力・非アサート (HIGH)
-        let n_wr = Output::<()>::without_pin(&mut gpio2, N_WR_OFFSET);
-        n_wr.set();
+        asm::delay(RESET_DELAY);
+        ral::write_reg!(ral::gpio, cart.gpio2, DR_SET, N_RESET);
+        asm::delay(RESET_DELAY);
 
-        // gpio4, gpio2 はここで drop。Output<()> は &'static RegisterBlock を保持するため
-        // Port が drop された後も使用可能（ハードウェアアドレスは常に有効）。
-        Self {
-            data_port,
-            n_rd,
-            n_wr,
+        cart
+    }
+
+    #[inline(always)]
+    fn set_address(&self, addr: u16) {
+        put_bits!(self.gpio1, GPIO1_ADDR_MASK, scatter(addr, 0, &A0_A9_BITS));
+        put_bits!(self.gpio4, GPIO4_ADDR_MASK, scatter(addr, 10, &A10_A13_BITS));
+        put_bits!(self.gpio2, GPIO2_ADDR_MASK, scatter(addr, 14, &A14_A15_BITS));
+    }
+
+    /// 外部 RAM 域 (0xA000-0xBFFF) のアクセス中だけ /CS をアサートする (実機 GB と同じ)。
+    #[inline(always)]
+    fn select_ram(&self, addr: u16, assert: bool) {
+        if addr >= 0xA000 {
+            if assert {
+                ral::write_reg!(ral::gpio, self.gpio2, DR_CLEAR, N_CS);
+            } else {
+                ral::write_reg!(ral::gpio, self.gpio2, DR_SET, N_CS);
+            }
         }
     }
 }
 
 impl CartridgeBus for GpioCart {
     fn read(&self, addr: u16) -> u8 {
-        // Safety: single-threaded embedded, GPIO1 クロックゲートは board::t41() で有効化済み
-        let gpio1 = unsafe { bsp::ral::gpio::GPIO1::instance() };
+        self.set_address(addr);
+        self.select_ram(addr, true);
 
-        // アドレス出力
-        bsp::ral::modify_reg!(bsp::ral::gpio, gpio1, DR, |dr| (dr & !ADDR_MASK)
-            | (addr as u32 & ADDR_MASK));
-
-        // /RD をアサート → 待機 → データ読み取り → デアサート
-        self.n_rd.clear();
+        // /RD=L で 245 の DIR が Cart→Teensy に切り替わる。データピンは常時入力なので衝突しない。
+        ral::write_reg!(ral::gpio, self.gpio4, DR_CLEAR, N_RD);
         asm::delay(ACCESS_DELAY);
-        let val = ((bsp::ral::read_reg!(bsp::ral::gpio, gpio1, PSR) >> DATA_SHIFT) & 0xFF) as u8;
-        self.n_rd.set();
+        let val = (ral::read_reg!(ral::gpio, self.gpio1, PSR) >> DATA_SHIFT) as u8;
+        ral::write_reg!(ral::gpio, self.gpio4, DR_SET, N_RD);
+
+        self.select_ram(addr, false);
         val
     }
 
     fn write(&mut self, addr: u16, val: u8) {
-        let gpio1 = unsafe { bsp::ral::gpio::GPIO1::instance() };
+        self.set_address(addr);
 
-        // アドレス出力
-        bsp::ral::modify_reg!(bsp::ral::gpio, gpio1, DR, |dr| (dr & !ADDR_MASK)
-            | (addr as u32 & ADDR_MASK));
+        // /RD=H (DIR=Teensy→Cart) の間だけデータピンを出力にする。
+        put_bits!(self.gpio1, DATA_MASK, (val as u32) << DATA_SHIFT);
+        ral::modify_reg!(ral::gpio, self.gpio1, GDIR, |d| d | DATA_MASK);
+        self.select_ram(addr, true);
 
-        // データバスを出力に切り替え → 書き込み
-        for bit in DATA_SHIFT..DATA_SHIFT + 8 {
-            let _ = Output::<()>::without_pin(&mut self.data_port, bit);
-        }
-        bsp::ral::modify_reg!(bsp::ral::gpio, gpio1, DR, |dr| (dr & !DATA_MASK)
-            | ((val as u32) << DATA_SHIFT));
-
-        // /WR アサート → 待機 → デアサート
-        self.n_wr.clear();
+        ral::write_reg!(ral::gpio, self.gpio2, DR_CLEAR, N_WR);
         asm::delay(ACCESS_DELAY);
-        self.n_wr.set();
+        ral::write_reg!(ral::gpio, self.gpio2, DR_SET, N_WR);
 
-        // データバスを入力に戻す
-        for bit in DATA_SHIFT..DATA_SHIFT + 8 {
-            let _ = Input::<()>::without_pin(&mut self.data_port, bit);
-        }
+        self.select_ram(addr, false);
+        ral::modify_reg!(ral::gpio, self.gpio1, GDIR, |d| d & !DATA_MASK);
     }
 }

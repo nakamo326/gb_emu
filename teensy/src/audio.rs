@@ -7,7 +7,7 @@
 /// | SAI1_TX_DATA | 7          | GPIO_B1_01    | MAX98357A DIN               |
 /// | SAI1_TX_BCLK | 26         | GPIO_AD_B1_14 | MAX98357A BCLK              |
 /// | SAI1_TX_SYNC | 27         | GPIO_AD_B1_15 | MAX98357A LRC               |
-/// | SAI1_MCLK    | 23         | GPIO_AD_B1_09 | 未接続 (API 要件のため使用) |
+/// | SAI1_MCLK    | 23         | GPIO_AD_B1_09 | 未接続。API 要件で渡すだけで、real-cart では初期化後にカートの D7 (GPIO) へ切り替え直す |
 ///
 /// # クロック
 ///

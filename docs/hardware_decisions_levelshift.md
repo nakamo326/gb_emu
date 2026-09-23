@@ -7,6 +7,14 @@
 > 1. データバスを単方向 245 × 2（U4/U5）→ 双方向 245 × 1（U4, DIR=/RD 直結）に統合。IC 総数 5 → 4。
 > 2. ピン表の A14 (pin 6) を `GPIO4` → `GPIO2[10]`（`GPIO_B0_10`）に訂正。
 > 3. §7「A0–A9 は連続ビット」を訂正（同一 GPIO1 レジスタだがビットは非連続）。
+>
+> **改訂 (2026-09-23 実カート読み込み実装)**:
+> 1. A15 を追加（pin 8 = GPIO2[16]、U3 の空き ch 経由）。MBC は A15 で「レジスタ書き込み」と
+>    「ROM 選択」を判定するため、A15 が無いと外部 RAM への書き込みが ROM バンク切り替えに化け、
+>    RAM 読み出し時には ROM と RAM がデータバス上で衝突する。
+> 2. pin 8 を空けるため、ディスプレイの RST は 3.3V 直結に変更（リセットは SWRESET で代替）。
+> 3. /WR・/CS の GPIO ビットを訂正（pin 34 = GPIO_B1_13 = GPIO2[29]、pin 35 = GPIO_B1_12 = GPIO2[28]）。
+> 4. D7（pin 23）は SAI1_MCLK と共用。MCLK は未配線なので、オーディオ初期化後に GPIO へ戻して使う。
 
 ---
 
@@ -36,8 +44,8 @@ GB バスには過剰なリスクがある。
 | # | 対象信号 | ch 数 | 方向 | 備考 |
 |---|----------|-------|------|------|
 | U1 | A0–A7 | 8 | Teensy → Cart | 単方向 |
-| U2 | A8–A14, /RESET | 8 | Teensy → Cart | 単方向。A15 は不使用 |
-| U3 | /RD, /WR, /CS | 3（+空き5ch） | Teensy → Cart | 単方向。CLK は未接続のため非搭載（§6 参照）。空き ch は将来拡張用 |
+| U2 | A8–A14, /RESET | 8 | Teensy → Cart | 単方向 |
+| U3 | /RD, /WR, /CS, A15 | 4（+空き4ch） | Teensy → Cart | 単方向。CLK は未接続のため非搭載（§6 参照） |
 | U4 | D0–D7 | 8 | **双方向** | DIR=/RD で方向切替（§3 参照） |
 
 **合計: 4 個**
@@ -145,6 +153,7 @@ IC ピンから 2mm 以内に実装すること。
 | 4 | A12 | GPIO4[6] | GPIO_EMC_06 |
 | 5 | A13 | GPIO4[8] | GPIO_EMC_08 |
 | 6 | A14 | GPIO2[10] | GPIO_B0_10（GPIO4 ではない） |
+| 8 | A15 | GPIO2[16] | GPIO_B1_00。U3 経由。ディスプレイ RST から転用 |
 | 14 | D0 | GPIO1[18] | データバス（連続） |
 | 15 | D1 | GPIO1[19] | |
 | 16 | D5 | GPIO1[23] | |
@@ -154,19 +163,18 @@ IC ピンから 2mm 以内に実装すること。
 | 20 | A8 | GPIO1[26] | |
 | 21 | A9 | GPIO1[27] | |
 | 22 | D6 | GPIO1[24] | |
-| 23 | D7 | GPIO1[25] | |
+| 23 | D7 | GPIO1[25] | SAI1_MCLK と共用（MCLK は未配線。初期化後に GPIO へ戻す） |
 | 24 | A4 | GPIO1[12] | |
 | 25 | A5 | GPIO1[13] | |
 | 33 | /RD | GPIO4[7] | 74AHCT245 DIR にも配線 |
-| 34 | /WR | GPIO2[28] | |
-| 35 | /CS | GPIO2[29] | |
-| 37 | /RESET | — | **今回追加** |
+| 34 | /WR | GPIO2[29] | GPIO_B1_13 |
+| 35 | /CS | GPIO2[28] | GPIO_B1_12 |
+| 37 | /RESET | GPIO2[19] | GPIO_B1_03 |
 | 38 | A2 | GPIO1[28] | |
 | 39 | A3 | GPIO1[29] | |
 | 40 | D2 | GPIO1[20] | 拡張ピン |
 | 41 | D3 | GPIO1[21] | 拡張ピン |
 
-A15 は不使用（ROM 域は常に 0、外部 RAM は /CS で選択）。  
 CLK・AUDIO_IN は未接続。
 
 ### ディスプレイ（DmaDisplay / ILI9341）
@@ -178,7 +186,7 @@ CLK・AUDIO_IN は未接続。
 | 13 | SCK (LPSPI4) | |
 | 10 | CS | |
 | 9 | DC/RS | GPIO2 |
-| 8 | RST | GPIO2 |
+| — | RST | 3.3V 直結（pin 8 は A15 に転用。リセットは SWRESET） |
 | — | BL | 3.3V 直結（GPIO 駆動不可） |
 
 ### オーディオ（SAI1 TX / PCM5102）
@@ -202,48 +210,17 @@ CLK・AUDIO_IN は未接続。
 
 ---
 
-## 7. ソフトウェア残タスク（cartridge.rs）
+## 7. ソフトウェア実装（cartridge.rs）
 
-### A10–A14 の scatter 実装
+2026-09-23 に実装済み。`make FEATURES=real-cart build` で有効になる（ROM 埋め込みは不要になる）。
 
-A0–A9 は全て同一の GPIO1 レジスタに載るため 1 回の DR 書き込みで出力できる
-（ただしビットは**非連続**: 2,3,12,13,16,17,26,27,28,29 なので scatter 処理が必要）。
-A10–A13 は GPIO4、A14 は GPIO2 に分散しているため個別にセットする必要がある。
-
-```rust
-// TODO: cartridge.rs の set_address() 内
-fn set_address(&mut self, addr: u16) {
-    // A0–A9: GPIO1 に一括書き込み（scatter マスク適用）
-    // A10–A14: GPIO4 / GPIO2 に個別セット  ← 未実装
-}
-```
-
-### /RESET 制御の追加
-
-```rust
-// GpioCart 構造体に reset_pin フィールドを追加
-pub struct GpioCart {
-    // ... 既存フィールド
-    reset_pin: GpioPin<Output>,  // pin 37
-}
-
-impl GpioCart {
-    pub fn new(..., reset_pin: ...) -> Self {
-        let mut cart = Self { ..., reset_pin };
-        cart.reset();
-        cart
-    }
-
-    pub fn reset(&mut self) {
-        self.reset_pin.set_low();
-        cortex_m::asm::delay(600_000); // 1ms @ 600MHz
-        self.reset_pin.set_high();
-        cortex_m::asm::delay(600_000); // 安定待ち
-    }
-}
-```
-
----
+- アドレス出力: A0–A9 は GPIO1、A10–A13 は GPIO4、A14/A15 は GPIO2 の各ビットへ scatter し、
+  DR_SET/DR_CLEAR で書く（同じポートのディスプレイ DC・ボタン走査線と read-modify-write で競合させない）。
+- /CS は 0xA000–0xBFFF のアクセス中だけアサートする（実機 GB と同じ）。
+- /RESET は `GpioCart::new()` で L 1ms → H → 1ms 待ちのパルスを出す。
+- 起動時にヘッダチェックサム（0x14D）を検証し、不一致なら panic（未挿入・配線不良・タイミング不足）。
+- アクセス待ちは約 300ns（`ACCESS_DELAY`）。ROM のアクセスタイム（150ns 前後）より余裕を持たせており、
+  実機で負荷 % を見ながら詰める余地がある。
 
 ## 8. パッケージ選定
 

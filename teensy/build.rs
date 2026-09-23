@@ -5,6 +5,14 @@ fn main() {
     // --- ROM パス解決 ---
     // GB_ROM 環境変数で上書き可能。未指定時は roms/game.gb を使用。
     // Makefile からは: GB_ROM="$(ROM)" cargo build ...
+    // real-cart では ROM を埋め込まないため解決不要 (ファイルが無くてもビルドできるようにする)。
+    if std::env::var_os("CARGO_FEATURE_REAL_CART").is_none() {
+        resolve_rom_path();
+    }
+    build_runtime();
+}
+
+fn resolve_rom_path() {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let rom_path = match std::env::var("GB_ROM") {
         Ok(p) => {
@@ -20,7 +28,9 @@ fn main() {
     println!("cargo:rustc-env=GB_ROM_PATH={}", rom_path.display());
     println!("cargo:rerun-if-env-changed=GB_ROM");
     println!("cargo:rerun-if-changed={}", rom_path.display());
+}
 
+fn build_runtime() {
 
     // i.MX RT1062 (Teensy 4.1) 向けランタイムを生成する。
     // FCB / IVT / boot data の配置・FlexRAM バンク設定・リンカスクリプト (t4link.x) を

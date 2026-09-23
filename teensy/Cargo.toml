@@ -8,6 +8,10 @@ name = "gb-teensy"
 test = false
 bench = false
 
+[features]
+# ROM を Flash 埋め込みではなく GPIO バス経由で実カートリッジから読む。
+real-cart = []
+
 [dependencies]
 gb-core         = { path = "../core" }
 cortex-m        = { version = "0.7", features = ["critical-section-single-core"] }
