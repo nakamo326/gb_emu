@@ -43,7 +43,7 @@ use sdcard::FlashCart;
 /// Teensy 4.1 全ピン割り当て (確定):
 ///
 /// ┌ Display (LPSPI4) ──────────────────────────────────────────────┐
-/// │ MOSI=11  MISO=12  SCK=13  CS=10(PCS0)  DC=9  RST=8  BL=3.3V直結  │
+/// │ MOSI=11  MISO=12  SCK=13  CS=10(PCS0)  DC=9  RST/BL=3.3V直結     │
 /// ├ Cartridge (GpioCart) ──────────────────────────────────────────┤
 /// │ D0-D7 = 14,15,40,41,17,16,22,23     (GPIO1[18-25] 連続・高速読出) │
 /// │ A0-A9 = 19,18,38,39,24,25,0,1,20,21 (全て GPIO1。bit は非連続)    │
@@ -145,10 +145,9 @@ fn main() -> ! {
     }
 
     let dc = gpio2.output(pins.p9);
-    let rst = gpio2.output(pins.p8);
     let dma_channel = dma[0].take().unwrap();
 
-    let display = DmaDisplay::<St7789, _, _, _>::new(spi, dc, rst, dma_channel);
+    let display = DmaDisplay::<St7789, _, _>::new(spi, dc, dma_channel);
 
     // ------- SAI1 オーディオ (MAX98357A/PCM5102A, I2S) -------
     // 既知の問題: 有効化するとランダムなタイミングで画面が真っ黒になる未解決バグがある。

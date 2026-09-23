@@ -55,10 +55,11 @@ const LPSPI4_TX_DMA_SOURCE: u32 = 80;
 
 static mut FB: [[u32; BUF_U32]; 2] = [[0; BUF_U32]; 2];
 
-pub struct DmaDisplay<P, SPI, DC, RST> {
+/// パネルの RST は 3.3V 固定配線とし、GPIO では駆動しない (pin 8 はカートの A15 に転用)。
+/// リセットは初期化シーケンス先頭の SWRESET で代替する。
+pub struct DmaDisplay<P, SPI, DC> {
     spi: SPI,
     dc: DC,
-    rst: RST,
     channel: Channel,
     back: usize,
     in_flight: bool,
@@ -82,18 +83,16 @@ pub struct DmaDisplay<P, SPI, DC, RST> {
     _panel: PhantomData<P>,
 }
 
-impl<P, SPI, DC, RST> DmaDisplay<P, SPI, DC, RST>
+impl<P, SPI, DC> DmaDisplay<P, SPI, DC>
 where
     P: PanelController,
     SPI: SpiWrite<u8>,
     DC: OutputPin,
-    RST: OutputPin,
 {
-    pub fn new(spi: SPI, dc: DC, rst: RST, channel: Channel) -> Self {
+    pub fn new(spi: SPI, dc: DC, channel: Channel) -> Self {
         let mut d = Self {
             spi,
             dc,
-            rst,
             channel,
             back: 0,
             in_flight: false,
@@ -133,11 +132,6 @@ where
     }
 
     fn init_panel(&mut self) {
-        let _ = self.rst.set_low();
-        Self::delay_ms(10);
-        let _ = self.rst.set_high();
-        Self::delay_ms(120);
-
         for step in P::init_sequence() {
             self.cmd(step.cmd);
             if !step.data.is_empty() {
@@ -489,12 +483,11 @@ where
     }
 }
 
-impl<P, SPI, DC, RST> Display for DmaDisplay<P, SPI, DC, RST>
+impl<P, SPI, DC> Display for DmaDisplay<P, SPI, DC>
 where
     P: PanelController,
     SPI: SpiWrite<u8>,
     DC: OutputPin,
-    RST: OutputPin,
 {
     fn draw(&mut self, pixels: &[u16]) {
         // 1. 前回の DMA 完了を待つ

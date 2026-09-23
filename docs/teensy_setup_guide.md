@@ -192,7 +192,7 @@ teensy_loader_cli --mcu=TEENSY41 -w -v \
 
 **ディスプレイが真っ暗:**
 - バックライト (BL/LED ピン) が 3.3V に直結されているか確認（GPIO 駆動は電流不足で不可）
-- RST ピン (pin 8) の配線確認
+- RST ピンが 3.3V に直結されているか確認（リセットは SWRESET で代替）
 - SPI の MOSI/SCK ピン (pin 11, 13) の配線確認
 
 **ビルドエラー `include_bytes!` でファイルが見つからない:**
