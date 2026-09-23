@@ -26,7 +26,8 @@ use teensy4_bsp as bsp;
 ///
 /// # 配線の注意
 ///
-/// - GB カートリッジは 5V 系。74AHCT245 ×4 でレベル変換する (docs/hardware_decisions_levelshift.md)。
+/// - GB カートリッジは 5V 系。アドレス・制御線は 74AHCT245、データバスは 2 電源の SN74LVC8T245
+///   (VCCA=3.3V/VCCB=5V) でレベル変換する (docs/real_cart_wiring.md)。
 /// - A15 を省略すると MBC が外部 RAM アクセスを ROM 域 (レジスタ書き込み・ROM 選択) と
 ///   誤認するため、A15 は必須。
 /// - CLK / AUDIO_IN は未接続でよい。

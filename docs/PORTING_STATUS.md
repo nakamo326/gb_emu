@@ -238,7 +238,7 @@ ROM 供給は 2 経路あり、**現在 `main.rs` は `FlashCart`（Flash 埋め
 | /RESET | 37 | GPIO 出力（245 の空き ch 経由）※今回追加 |
 
 **留意点:**
-- GB は 5V 系 → 74AHCT245 ×4 でレベル変換。データバスは双方向 245 ×1（DIR=/RD 直結）。
+- GB は 5V 系 → アドレス・制御線は 74AHCT245 ×3、データバスは 2 電源の SN74LVC8T245 ×1（DIR=/RD 直結）でレベル変換。
   IC 構成・配線・パスコンの詳細は [hardware_decisions_levelshift.md](hardware_decisions_levelshift.md) 参照
 - アクセスタイム: `cortex_m::asm::delay(90)` ≈ 150 ns @ 600 MHz
 - A15 は不使用: ROM 域は常に 0、外部 RAM (0xA000–0xBFFF) は /CS で選択（実機準拠）
