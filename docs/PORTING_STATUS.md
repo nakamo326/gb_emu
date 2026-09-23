@@ -217,13 +217,13 @@ WSL からは `make flash TEENSY_CLI=.../teensy_loader_cli.exe` で Windows 側�
 
 ### D. CartridgeBus 実装 ✅ 完了（実機調整残）
 
-ROM 供給は 2 経路あり、**現在 `main.rs` は `FlashCart`（Flash 埋め込み）を使用中**。
+ROM 供給は 2 経路あり、Cargo feature で切り替える（既定は `FlashCart`、`make FEATURES=real-cart` で `GpioCart`）。
 
 - **`teensy/src/sdcard.rs` `FlashCart`**（デフォルト）: `include_bytes!("../../roms/game.gb")`
   でビルド時に Flash へ埋め込む。RomOnly(32KB) と MBC1(最大 2MB ROM + 32KB RAM、バンク
   切替・外部 RAM 対応) をサポート。SDカード方式は将来実装予定（`embedded-sdmmc` 0.7）。
-- **`teensy/src/cartridge.rs` `GpioCart`**: 実 GB カートリッジを GPIO バスで読む実装（下記）。
-  現在 `main.rs` からは未使用（ピン配は確定済み・実機配線、アドレス scatter 実装、/RESET 制御の追加待ち）。
+- **`teensy/src/cartridge.rs` `GpioCart`**（`real-cart`）: 実 GB カートリッジを GPIO バスで読む実装（下記）。
+  実装済み・実機未検証。配線と確認手順は [real_cart_wiring.md](real_cart_wiring.md)。
 
 **確定ピン配:**
 
@@ -231,21 +231,24 @@ ROM 供給は 2 経路あり、**現在 `main.rs` は `FlashCart`（Flash 埋め
 |---|---|---|
 | D0–D7 | 14,15,40,41,17,16,22,23 | GPIO1[18–25] (連続・高速読出) |
 | A0–A9 | 19,18,38,39,24,25,0,1,20,21 | GPIO1[16,17,28,29,12,13,3,2,26,27] ※非連続 |
-| A10–A14 | 2,3,4,5,6 | GPIO4 / GPIO2[10] |
-| /RD | 33 | GPIO4[7] （74AHCT245 の DIR 直結で双方向バス制御。下記ハード設計書参照） |
-| /WR | 34 | GPIO2[28] (t41 拡張) |
-| /CS | 35 | GPIO2[29] (t41 拡張) |
-| /RESET | 37 | GPIO 出力（245 の空き ch 経由）※今回追加 |
+| A10–A13 | 2,3,4,5 | GPIO4[4,5,6,8] |
+| A14 | 6 | GPIO2[10] |
+| A15 | 8 | GPIO2[16]（ディスプレイ RST から転用） |
+| /RD | 33 | GPIO4[7] （データバス U4 の DIR にも直結。下記ハード設計書参照） |
+| /WR | 34 | GPIO2[29] (t41 拡張) |
+| /CS | 35 | GPIO2[28] (t41 拡張) |
+| /RESET | 37 | GPIO2[19]（U2 の空き ch 経由） |
 
 **留意点:**
 - GB は 5V 系 → アドレス・制御線は 74AHCT245 ×3、データバスは 2 電源の SN74LVC8T245 ×1（DIR=/RD 直結）でレベル変換。
   IC 構成・配線・パスコンの詳細は [hardware_decisions_levelshift.md](hardware_decisions_levelshift.md) 参照
-- アクセスタイム: `cortex_m::asm::delay(90)` ≈ 150 ns @ 600 MHz
-- A15 は不使用: ROM 域は常に 0、外部 RAM (0xA000–0xBFFF) は /CS で選択（実機準拠）
-- A0–A9 は GPIO1 の非連続ビットに散るため、出力は 1 回の DR 書き込みで scatter する。
-  A10–A14 は別ポートのため個別セット（`cartridge.rs` の TODO）
-- **/RESET は pin 37 から制御**（電源投入後に LOW→HIGH のリセットパルスで MBC バンクレジスタを初期化）。
-  3.3V 固定では RomOnly しか安定しない。`GpioCart` への `reset_pin` 追加が残タスク（`cartridge.rs`）
+- アクセス待ち: `ACCESS_DELAY` = 180 cycle ≈ 300 ns @ 600 MHz（余裕値。実機で詰める余地あり）
+- A15 は必須: MBC は A15 でレジスタ書き込みと ROM 選択を判定する。外部 RAM (0xA000–0xBFFF) は
+  A15=1 かつ /CS アサートでアクセスする（実機準拠）
+- アドレスは GPIO1 / GPIO4 / GPIO2 の各ビットへ scatter し、DR_SET/DR_CLEAR で書く
+- D7 (pin 23) は SAI1_MCLK と共用。オーディオ初期化後に GPIO へ戻す
+- **/RESET は pin 37 から制御**（`GpioCart::new()` で LOW 1ms → HIGH のパルスで MBC を初期化）
+- 起動時にヘッダチェックサムを検証し、不一致なら panic
 - CLK/AUDIO_IN は未接続でよい
 
 ---
@@ -327,12 +330,12 @@ host/src/
 └── renderer.rs     TerminalRenderer（未使用・保留）
 
 teensy/src/
-├── main.rs         エントリ / cache有効化 / SPI 33MHz / FlashCart / ペーシングループ
+├── main.rs         エントリ / cache有効化 / SPI 33MHz / FlashCart・GpioCart 切替 / ペーシングループ
 ├── display/
 │   ├── mod.rs      DmaDisplay<P,SPI,DC,RST> — impl Display ✅ (eDMA + ダブルバッファ)
 │   └── panel.rs    PanelController / Ili9341 (パネル抽象)
 ├── sdcard.rs       FlashCart — impl CartridgeBus ✅ (Flash 埋め込み, RomOnly/MBC1)
-├── cartridge.rs    GpioCart — impl CartridgeBus ✅ (実カート用・ピン確定 / scatter実装待ち)
+├── cartridge.rs    GpioCart — impl CartridgeBus ✅ (実カート用・real-cart feature、実機未検証)
 ├── audio.rs        SaiAudio — impl AudioSink ⚠️ (実装済みだが画面が黒くなる問題により無効化中)
 └── input.rs        GpioInput — impl InputSource (スタブ / ピン未割当)
 ```
@@ -344,7 +347,7 @@ teensy/src/
 | A | `cargo run -p gb-host` で実機 PC 動作確認 | 未着手 |
 | B | `teensy/` クレートの骨組み（imxrt-rt 化済み） | ✅ 完了 |
 | C | ILI9341 Display 実装（DMA 描画 + パネル抽象） | ✅ 完了 |
-| D | CartridgeBus 実装（FlashCart 使用中 / GpioCart 実カート用） | ✅ 完了（ピン確定 / scatter・/RESET 実装待ち） |
+| D | CartridgeBus 実装（FlashCart 既定 / GpioCart は real-cart feature） | ✅ 完了（GpioCart は実機検証待ち） |
 | E | I2S AudioSink 実装 | スタブのみ |
 | F | GPIO ボタン入力実装（2x4 マトリクス） | ✅ 完了（実機配線待ち） |
 | G | CI / その他 | 未着手 |
