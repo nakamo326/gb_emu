@@ -280,7 +280,7 @@ SAI1 (I2S) + MAX98357A/PCM5102A DAC 向けの実装自体は完了している�
 
 ### GB カートリッジの直接読み込み (`teensy/src/cartridge.rs`)
 
-74AHCT245 レベルシフタ経由で実 GB カートリッジのバスに接続する。
+SN74LVC16T245 レベルシフタ 2 個を経由して実 GB カートリッジのバスに接続する。
 GPIO バスから都度読み出すため ROM バッファは不要で、RAM を圧迫しない。
 詳細は [PORTING_STATUS.md](../PORTING_STATUS.md) のタスク D を参照。
 

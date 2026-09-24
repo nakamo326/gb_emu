@@ -234,13 +234,13 @@ ROM 供給は 2 経路あり、Cargo feature で切り替える（既定は `Fla
 | A10–A13 | 2,3,4,5 | GPIO4[4,5,6,8] |
 | A14 | 6 | GPIO2[10] |
 | A15 | 8 | GPIO2[16]（ディスプレイ RST から転用） |
-| /RD | 33 | GPIO4[7] （データバス U4 の DIR にも直結。下記ハード設計書参照） |
+| /RD | 33 | GPIO4[7] （U2 データバンクの DIR にも直結） |
 | /WR | 34 | GPIO2[29] (t41 拡張) |
 | /CS | 35 | GPIO2[28] (t41 拡張) |
-| /RESET | 37 | GPIO2[19]（U2 の空き ch 経由） |
+| /RESET | 37 | GPIO2[19]（U2 の制御バンク経由） |
 
 **留意点:**
-- GB は 5V 系 → アドレス・制御線は 74AHCT245 ×3、データバスは 2 電源の SN74LVC8T245 ×1（DIR=/RD 直結）でレベル変換。
+- GB は 5V 系 → SN74LVC16T245 ×2（VCCA=3.3V、VCCB=5V）で全信号をレベル変換。U2 のデータバンクは DIR=/RD 直結。
   IC 構成・配線・パスコンの詳細は [hardware_decisions_levelshift.md](hardware_decisions_levelshift.md) 参照
 - アクセス待ち: `ACCESS_DELAY` = 180 cycle ≈ 300 ns @ 600 MHz（余裕値。実機で詰める余地あり）
 - A15 は必須: MBC は A15 でレジスタ書き込みと ROM 選択を判定する。外部 RAM (0xA000–0xBFFF) は

@@ -62,7 +62,7 @@ use input::GpioInput;
 ///
 /// 実機検証で判明した配線の重要事項 (詳細は docs/teensy_setup_guide.md):
 ///   - 単一 SPI デバイスなら CS→GND, RESET→3.3V 固定が最も確実 (p8 は A15 に転用済み)。
-///   - GB カートリッジは 5V 系 → D/A/制御線は 74AHCT245 等でレベル変換が必要。
+///   - GB カートリッジは 5V 系 → SN74LVC16T245 ×2 でレベル変換する。
 ///
 /// ROM の供給元は feature で切り替える:
 ///   - デフォルト: Flash に埋め込んだ ROM (include_bytes!)。

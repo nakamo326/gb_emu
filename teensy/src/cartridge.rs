@@ -19,15 +19,15 @@ use teensy4_bsp as bsp;
 /// | A10-A13| 2,3,4,5    | GPIO4[4,5,6,8]    | |
 /// | A14    | 6          | GPIO2[10]         | |
 /// | A15    | 8          | GPIO2[16]         | ディスプレイ RST から転用 (RST は 3.3V 固定) |
-/// | /RD    | 33         | GPIO4[7]          | 74AHCT245 (データバス) の DIR にも直結 |
+/// | /RD    | 33         | GPIO4[7]          | U2 のデータバンクの DIR にも直結 |
 /// | /WR    | 34         | GPIO2[29]         | GPIO_B1_13 |
 /// | /CS    | 35         | GPIO2[28]         | GPIO_B1_12。0xA000-0xBFFF (外部 RAM) でアサート |
 /// | /RESET | 37         | GPIO2[19]         | 初期化時に L→H パルスで MBC を初期化 |
 ///
 /// # 配線の注意
 ///
-/// - GB カートリッジは 5V 系。アドレス・制御線は 74AHCT245、データバスは 2 電源の SN74LVC8T245
-///   (VCCA=3.3V/VCCB=5V) でレベル変換する (docs/real_cart_wiring.md)。
+/// - GB カートリッジは 5V 系。SN74LVC16T245 を 2 個使い、全信号を
+///   VCCA=3.3V/VCCB=5V でレベル変換する (docs/real_cart_wiring.md)。
 /// - A15 を省略すると MBC が外部 RAM アクセスを ROM 域 (レジスタ書き込み・ROM 選択) と
 ///   誤認するため、A15 は必須。
 /// - CLK / AUDIO_IN は未接続でよい。
