@@ -4,6 +4,8 @@
 対象: `make FEATURES=real-cart` で実 GB カートリッジを使う構成
 根拠: [TI SN74LVC16T245 データシート](https://www.ti.com/lit/ds/symlink/sn74lvc16t245.pdf)、[設計判断](hardware_decisions_levelshift.md)
 
+Teensy 側の全ピンの使用状況は [GPIO・周辺機能ピン割り当て](teensy_gpio_pin_assignments.md)を参照。
+
 ## 1. 構成と部品
 
 SN74LVC16T245 を **2 個**使う。両 IC とも A 側は Teensy 4.1 の 3.3V、B 側は GB カートリッジの 5V にする。各 IC は独立した 8 ビットバンクを 2 組持つ。

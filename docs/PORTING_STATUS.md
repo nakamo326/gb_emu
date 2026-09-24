@@ -210,7 +210,7 @@ WSL からは `make flash TEENSY_CLI=.../teensy_loader_cli.exe` で Windows 側�
 | SPI SCK  (LPSPI4) | 13 | |
 | CS       (LPSPI4) | 10 | |
 | DC/RS | 9 | GPIO2 |
-| RST | 8 | GPIO2 |
+| RST | — (3.3V直結) | pin 8 は実カートの A15 に使用 |
 | BL | — (3.3V直結) | GPIO では電流不足で駆動不可（実機検証で判明）。LED アノードを 3.3V に直結する。空いた pin 7 は SAI1_TX_DATA に確定 |
 
 ---
