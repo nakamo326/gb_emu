@@ -12,7 +12,7 @@ mod sdcard;
 use teensy4_bsp as bsp;
 use teensy4_panic as _;
 
-use bsp::board;
+use bsp::{board, hal};
 #[allow(unused_imports)]
 use bsp::interrupt;
 
@@ -44,7 +44,7 @@ use input::GpioInput;
 /// Teensy 4.1 全ピン割り当て (確定):
 ///
 /// ┌ Display (LPSPI4) ──────────────────────────────────────────────┐
-/// │ MOSI=11  MISO=12  SCK=13  CS=10(PCS0)  DC=9  RST/BL=3.3V直結     │
+/// │ DATA=12(SIN送信)  SCK=13  CS=GND  DC=11  RST/BL=3.3V直結     │
 /// ├ Cartridge (GpioCart) ──────────────────────────────────────────┤
 /// │ D0-D7 = 14,15,40,41,17,16,22,23     (GPIO1[18-25] 連続・高速読出) │
 /// │ A0-A9 = 19,18,38,39,24,25,0,1,20,21 (全て GPIO1。bit は非連続)    │
@@ -117,20 +117,16 @@ fn main() -> ! {
         cortex_m::peripheral::NVIC::unmask(bsp::interrupt::USB_OTG1);
     }
 
-    // ------- ILI9341 ディスプレイ (LPSPI4) -------
-    let spi: board::Lpspi4 = board::lpspi(
-        lpspi4,
-        board::LpspiPins {
-            sdo: pins.p11,
-            sdi: pins.p12,
-            sck: pins.p13,
-            pcs0: pins.p10,
-        },
-        // BSP の set_spi_clock は分周 half_div を下限3でクランプ → SCKDIV=4 固定。
-        // SPI = 132MHz/(4+2) = 約22MHz が実効上限で、ここに何を渡しても 22MHz になる。
-        // 実クロックは直後の CCR 直書きで設定するため、この値は形式的なもの。
-        24_000_000,
-    );
+    // ------- ST7789 ディスプレイ (LPSPI4, write-only) -------
+    // SIN を送信に使う。P11 は GPIO DC、P9/P10 はカート /OE 用に空ける。
+    // without_pins() のため、使用中にこの2ピンを再設定しないこと。
+    let mut lcd_data = pins.p12;
+    let mut lcd_sck = pins.p13;
+    hal::iomuxc::lpspi::prepare(&mut lcd_data);
+    hal::iomuxc::lpspi::prepare(&mut lcd_sck);
+    let mut spi = hal::lpspi::Lpspi::<(), 4>::without_pins(lpspi4);
+    // 元の board::lpspi と同じ root clock / 初期分周設定を維持する。
+    spi.disabled(|spi| spi.set_clock_hz(board::LPSPI_FREQUENCY, 24_000_000));
 
     // BSP のクランプを外し、CCR を直接書き換えて SPI を高速化する。
     // SCKDIV=2 → 132MHz/(2+2) = 33MHz。これで全画面 DMA 転送が約11msに収まり、
@@ -139,21 +135,31 @@ fn main() -> ! {
     // half_div=2 相当の 1 (クランプが無ければ hal が算出したはずの値と同一)。
     unsafe {
         const LPSPI4_BASE: u32 = 0x403A_0000;
-        let cr = (LPSPI4_BASE + 0x10) as *mut u32; // 制御レジスタ
+        let cfgr1 = (LPSPI4_BASE + 0x24) as *mut u32; // 構成レジスタ1
         let ccr = (LPSPI4_BASE + 0x40) as *mut u32; // クロック構成レジスタ
         const SCKDIV: u32 = 2; // 132/(2+2)=33MHz。22MHz に戻すなら 4
         const DLY: u32 = 1; // DBT/PCSSCK/SCKPCS (= half_div-1)
 
-        let men = core::ptr::read_volatile(cr) & 1;
-        core::ptr::write_volatile(cr, core::ptr::read_volatile(cr) & !1); // MEN=0
+        let was_enabled = spi.is_enabled();
+        spi.set_enable(false);
+        while spi.is_enabled() {}
+        // CFGR1: PINCFG=3 は SIN 送信 / SOUT 受信、OUTCFG=0 は出力を保持。
+        // MASTER / SAMPLE / その他の設定は HAL の初期値を保持する。
+        const PINCFG_MASK: u32 = 0b11 << 24;
+        const OUTCFG_MASK: u32 = 1 << 26;
+        let config = core::ptr::read_volatile(cfgr1);
+        core::ptr::write_volatile(
+            cfgr1,
+            (config & !(PINCFG_MASK | OUTCFG_MASK)) | (0b11 << 24),
+        );
         core::ptr::write_volatile(
             ccr,
             (DLY << 24) | (DLY << 16) | (DLY << 8) | SCKDIV, // SCKPCS|PCSSCK|DBT|SCKDIV
         );
-        core::ptr::write_volatile(cr, core::ptr::read_volatile(cr) | men); // MEN 復帰
+        spi.set_enable(was_enabled);
     }
 
-    let dc = gpio2.output(pins.p9);
+    let dc = gpio2.output(pins.p11);
     let dma_channel = dma[0].take().unwrap();
 
     let display = DmaDisplay::<St7789, _, _>::new(spi, dc, dma_channel);
