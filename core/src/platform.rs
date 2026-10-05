@@ -45,3 +45,6 @@ impl CartridgeBus for NullCartridge {
     }
     fn write(&mut self, _: u16, _: u8) {}
 }
+
+pub mod rom_reader;
+pub use rom_reader::{ReadBus, ReadError, ReadTiming, RomReader};
