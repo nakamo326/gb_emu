@@ -1,5 +1,7 @@
 # Teensy 4.1 GPIO・周辺機能ピン割り当て
 
+> 安全訂正: cart /RESETはカート側からLOW駆動され得るため、245のpush-pullから外す別open-drain案が必要です。旧/RESET配線は使用しないでください。B側bus-holdは/OE無効でも動作するため、弱pullで安全HIGHを保証できません。[安全条件](teensy_cart_safety.md)を優先してください。
+
 更新日: 2026-10-05
 
 Teensy 側の **P0〜P41** を、現在の [`teensy/src/main.rs`](../teensy/src/main.rs)、[`teensy/src/cartridge.rs`](../teensy/src/cartridge.rs)、[`teensy/src/input.rs`](../teensy/src/input.rs)、[`teensy/src/audio.rs`](../teensy/src/audio.rs) に合わせて示す。表の `GPIOx[y]` は GPIO ポートとビット番号。LPSPI4 と SAI1 の行は GPIO モードではなく周辺機能に切り替える。
