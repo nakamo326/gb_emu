@@ -1,12 +1,12 @@
 # Teensy 4.1 GPIO・周辺機能ピン割り当て
 
-更新日: 2026-09-24
+更新日: 2026-10-05
 
 Teensy 側の **P0〜P41** を、現在の [`teensy/src/main.rs`](../teensy/src/main.rs)、[`teensy/src/cartridge.rs`](../teensy/src/cartridge.rs)、[`teensy/src/input.rs`](../teensy/src/input.rs)、[`teensy/src/audio.rs`](../teensy/src/audio.rs) に合わせて示す。表の `GPIOx[y]` は GPIO ポートとビット番号。LPSPI4 と SAI1 の行は GPIO モードではなく周辺機能に切り替える。
 
 - **通常ビルド**: ROM を Flash に埋め込む。カートリッジ用ピンはファームウェアから設定しない。
 - **`real-cart` ビルド**: `make FEATURES=real-cart build`。実 GB カートリッジ用のアドレス、データ、制御線を追加する。
-表の「同左」は通常ビルドと同じ用途、`—` はそのビルドで用途を割り当てていないことを示す。`real-cart` ビルドでは P0〜P41 の全ピンをコード上で割り当てているが、画面の CS と MISO のように外部接続を省略できるピンもある。
+表の「同左」は通常ビルドと同じ用途、`—` はそのビルドで用途を割り当てていないことを示す。LCD変更は実装済み。P9/P10の/OEは予約で、まだコードでは未設定。SD端子P42〜P47は使わない。詳細は[ピン見直し計画](teensy_outer_pin_plan.md)を参照。
 
 | Teensy ピン | 通常ビルド | `real-cart` ビルド | GPIO / 周辺機能 |
 |---:|---|---|---|
@@ -19,10 +19,10 @@ Teensy 側の **P0〜P41** を、現在の [`teensy/src/main.rs`](../teensy/src/
 | P6 | — | カート A14（出力） | GPIO2[10] |
 | P7 | 音声 TX_DATA（出力） | 同左 | SAI1 |
 | P8 | — | カート A15（出力） | GPIO2[16] |
-| P9 | 画面 DC（出力） | 同左 | GPIO2[11] |
-| P10 | 画面 PCS0（出力） | 同左 | LPSPI4 |
-| P11 | 画面 MOSI / SDO（出力） | 同左 | LPSPI4 |
-| P12 | 画面 MISO / SDI（入力） | 同左 | LPSPI4 |
+| P9 | — | データ /OE 予約（未実装） | GPIO2[11] |
+| P10 | — | アドレス・制御3バンク共通 /OE 予約（未実装） | GPIO2[0] |
+| P11 | 画面 DC（出力） | 同左 | GPIO2[2] |
+| P12 | 画面 DATA（出力） | 同左 | LPSPI4 SIN、PINCFG=3 |
 | P13 | 画面 SCK（出力） | 同左 | LPSPI4 |
 | P14 | — | カート D0（双方向） | GPIO1[18] |
 | P15 | — | カート D1（双方向） | GPIO1[19] |
@@ -55,8 +55,8 @@ Teensy 側の **P0〜P41** を、現在の [`teensy/src/main.rs`](../teensy/src/
 
 ## 配線と切り替えの注意
 
-- 画面ドライバは現在 **ST7789**。P10 はコードで LPSPI4 の PCS0 に設定するが、現在の画面配線では CS を GND に固定しており、P10 へは接続しない。画面の MISO も接続省略可。DC は P9。画面の RST とバックライトは 3.3V に固定し、P8 を画面用に使わない。
+- 画面は **ST7789**。DC=P11、DATA=P12、SCK=P13、CS=GND、RST/BL=3.3V。LCD側のSDI/MOSIをP12へ接続し、LCD側SDO/MISOは未接続。新配線の実表示・波形は未検証。
 - 音声は P7・P26・P27 を外部へ配線する。P23 は音声初期化 API に渡す MCLK だが外部には配線しない。`real-cart` では音声初期化後に P23 を GPIO に戻し、カートの D7 に使う。
 - ボタンの P30・P31・P32・P36 は内部 22kΩ プルアップ付き入力。P28 を LOW にすると方向キー、P29 を LOW にすると A/B/Select/Start を読む。交点は[ボタン配線ガイド](teensy_button_wiring.md)を参照。
-- `real-cart` ではカート線を **SN74LVC16T245 ×2** 経由で接続する。P33 の /RD は U2 のデータバンクの DIR にも直結する。4 本の /OE は GND 固定で、**P42 はファームウェアでもレベル変換回路でも未使用**。IC とカート端子までの対応は[実カートリッジ配線ガイド](real_cart_wiring.md)を参照。
+- 採用予定は **AE-LLCNV-LVCH16T245 ×2**、A=3.3V/B=5V。P33の/RDはU2データバンクDIRにも接続する。現行GpioCartは/OE制御なし・書込みありの旧ドライバで、新配線用の読み取り専用PoCではない。[新計画](teensy_outer_pin_plan.md)と[旧配線ガイド](real_cart_wiring.md)を区別する。
 - USB シリアルは USB_OTG1 を使用し、この表の汎用ピンには割り当てない。

@@ -1,5 +1,7 @@
 # ハードウェア設計決定事項 — 実カートリッジのレベル変換
 
+> 2026-10-05: 以下は旧SN74LVC16T245単体IC・/OE常時L構成の記録です。新採用のAE-LLCNV-LVCH16T245 ×2とP9/P10 /OE制御は[ピン見直し計画](teensy_outer_pin_plan.md)を参照。旧47kΩ信号プル抵抗とICピン番号を新モジュールへ流用しないでください。新構成の実カート動作は未検証です。
+
 更新日: 2026-09-24
 対象: `teensy/src/cartridge.rs` / 実カートリッジ接続
 配線表: [real_cart_wiring.md](real_cart_wiring.md)
