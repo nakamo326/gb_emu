@@ -1,5 +1,7 @@
 # Teensy 4.1 外周ピン見直し計画
 
+> 追加ソフト4段階: [チェックアウト・合成PoC・ビルド手順](teensy_cart_test_stages.md)。GPIO非依存モデルのみ実装し、実GPIO/OE制御は未統合です。
+
 > 安全訂正: cart /RESETはカート側からLOW駆動され得るため、245のpush-pullから外す別open-drain案が必要です。旧/RESET配線は使用しないでください。B側bus-holdは/OE無効でも動作するため、弱pullで安全HIGHを保証できません。[安全条件](teensy_cart_safety.md)を優先してください。
 
 更新日: 2026-10-05。基点: `aa3febe306f30020902c26a0b07527eba0dd0a3b`。

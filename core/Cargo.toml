@@ -10,3 +10,11 @@ heapless = "0.8"
 default = []
 # blargg テスト ROM のシリアル/外部RAM出力検知（host のみ有効）
 test-harness = []
+
+# Synthetic host-only diagnostic; excluded from embedded/default builds.
+host-poc = []
+
+[[bin]]
+name = "cart_header_poc"
+path = "src/bin/cart_header_poc.rs"
+required-features = ["host-poc"]
